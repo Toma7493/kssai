@@ -161,6 +161,25 @@
             let taxDataE4 = await calculateTaxReserve(dbInstance, new Date().getFullYear().toString());
             assert(taxDataE4.taxRateStr === '0%', 'E. 0(設定済)は0%と表示', '0%', taxDataE4.taxRateStr);
 
+            log('<br>Test F: Tax Simulation (Auto Mode)');
+            await dbInstance.put('settings', { key: 'tax_calc_mode', value: 'auto' });
+            await dbInstance.put('settings', { key: 'tax_business_type', value: '個人事業主' });
+            await dbInstance.put('settings', { key: 'tax_declaration', value: '青色申告' });
+            await dbInstance.put('settings', { key: 'tax_blue_deduction', value: 650000 });
+            await dbInstance.put('settings', { key: 'tax_other_deductions', value: 480000 });
+            await dbInstance.put('settings', { key: 'tax_consumption', value: '免税' });
+            await dbInstance.put('settings', { key: 'tax_has_other_income', value: false });
+            
+            // profit = 67,000. 
+            let taxDataF = await calculateTaxReserve(dbInstance, new Date().getFullYear().toString(), true); // true = projected
+            // Projected Sales: 100,000 * 365 = 36,500,000? Wait, the current date logic might differ depending on how many days passed.
+            // But we can check if autoSim exists.
+            assert(taxDataF.taxMode === 'auto', 'F. Tax mode is auto', 'auto', taxDataF.taxMode);
+            assert(taxDataF.autoSim !== null, 'F. Auto simulation exists', true, taxDataF.autoSim !== null);
+            if (taxDataF.autoSim) {
+                assert(taxDataF.autoSim.incomeTax >= 0, 'F. Income tax calculated', true, taxDataF.autoSim.incomeTax >= 0);
+            }
+            
             log('<br>テスト完了しました。');
             
             // Destroy test DB

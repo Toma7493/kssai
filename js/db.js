@@ -136,32 +136,51 @@ function formatYMD(dateObj) {
 /**
  * Common tax and profit calculator
  */
-async function calculateTaxReserve(dbInstance, targetYear = null) {
+async function calculateTaxReserve(dbInstance, targetYear = null, useAnnualProjection = false) {
     const sales = await dbInstance.getAll('sales');
     const expenses = await dbInstance.getAll('expenses');
     const settings = await dbInstance.getAll('settings');
     
-    const taxRateObj = settings.find(s => s.key === 'tax_rate');
-    const configuredObj = settings.find(s => s.key === 'tax_rate_configured');
-    const isConfigured = configuredObj ? configuredObj.value : false;
+    // Get Settings
+    const getSet = (k, def) => {
+        const s = settings.find(x => x.key === k);
+        return s ? s.value : def;
+    };
+
+    const taxMode = getSet('tax_calc_mode', 'manual'); // 'manual' or 'auto'
     
-    let taxRate = 0;
-    let taxRateStr = '未設定';
+    // --- Manual Calculation Setup ---
+    const taxRateObj = settings.find(s => s.key === 'tax_rate');
+    const isConfigured = getSet('tax_rate_configured', false);
+    
+    let manualTaxRate = 0;
+    let manualTaxRateStr = '未設定';
     
     if (taxRateObj && taxRateObj.value !== '' && taxRateObj.value !== null) {
         let val = parseFloat(taxRateObj.value);
         if (!isNaN(val)) {
             if (val === 0 && !isConfigured) {
-                taxRateStr = '未設定'; // 初期値0を未設定として扱う
+                manualTaxRateStr = '未設定';
             } else if (val > 0 && val <= 1) {
-                taxRate = val; // 旧仕様の 0.2 等
-                taxRateStr = (val * 100).toFixed(0) + '%';
+                manualTaxRate = val; 
+                manualTaxRateStr = (val * 100).toFixed(0) + '%';
             } else if (val >= 0) {
-                taxRate = val / 100; // 新仕様の 20 等
-                taxRateStr = val + '%';
+                manualTaxRate = val / 100;
+                manualTaxRateStr = val + '%';
             }
         }
     }
+    
+    // --- Auto Tax Config Setup ---
+    const autoConfig = {
+        businessType: getSet('tax_business_type', '個人事業主'),
+        declarationType: getSet('tax_declaration', '青色申告'),
+        blueDeduction: getSet('tax_blue_deduction', 650000),
+        otherDeductions: getSet('tax_other_deductions', 480000),
+        hasOtherIncome: getSet('tax_has_other_income', false),
+        consumptionTaxType: getSet('tax_consumption', '免税'),
+        estimatedExpenses: 0
+    };
     
     let validSales = sales.filter(s => !s.refunded);
     let allExpensesForProfit = expenses; 
@@ -169,23 +188,50 @@ async function calculateTaxReserve(dbInstance, targetYear = null) {
     if (targetYear) {
         validSales = validSales.filter(s => formatYMD(getJSTDate(s.date)).startsWith(targetYear));
         allExpensesForProfit = allExpensesForProfit.filter(e => {
-            // expenses date is stored as YYYY-MM-DD locally, but let's parse just in case
             return e.date.startsWith(targetYear);
         });
     }
     
     const totalSales = validSales.reduce((sum, s) => sum + s.total, 0);
     const totalExpenses = allExpensesForProfit.reduce((sum, e) => sum + e.amount, 0);
-    const profit = Math.max(0, totalSales - totalExpenses);
+    const actualProfit = Math.max(0, totalSales - totalExpenses);
     
-    let reserve = 0;
-    if (taxRateStr !== '未設定') {
-        reserve = Math.floor(profit * taxRate);
+    autoConfig.estimatedExpenses = totalExpenses;
+    
+    // Annual Projection Logic
+    let projectedProfit = actualProfit;
+    let projectedSales = totalSales;
+    if (useAnnualProjection && targetYear) {
+        const today = getJSTDate(new Date().toISOString());
+        let daysPassed = 365;
+        if (targetYear === String(today.getFullYear())) {
+            const startOfYear = new Date(today.getFullYear(), 0, 1);
+            daysPassed = Math.max(1, Math.floor((today - startOfYear) / (1000 * 60 * 60 * 24)) + 1);
+        }
+        
+        if (daysPassed < 365) {
+            projectedProfit = Math.floor(actualProfit * (365 / daysPassed));
+            projectedSales = Math.floor(totalSales * (365 / daysPassed));
+            autoConfig.estimatedExpenses = Math.floor(totalExpenses * (365 / daysPassed));
+        }
     }
     
-    const transactions = await dbInstance.getAll('transactions');
-    let taxPaid = 0;
+    // Manual calculation
+    let manualReserve = 0;
+    if (manualTaxRateStr !== '未設定') {
+        manualReserve = Math.floor(projectedProfit * manualTaxRate);
+    }
     
+    // Auto Tax Simulation
+    let autoSim = null;
+    if (typeof simulateTaxes !== 'undefined') {
+        autoSim = simulateTaxes(projectedProfit, autoConfig);
+    }
+    
+    const reserveToUse = (taxMode === 'auto' && autoSim) ? autoSim.totalTax : manualReserve;
+    
+    // Tax Paid deduction
+    const transactions = await dbInstance.getAll('transactions');
     let targetTx = transactions;
     if (targetYear) {
         targetTx = targetTx.filter(t => {
@@ -193,16 +239,24 @@ async function calculateTaxReserve(dbInstance, targetYear = null) {
             return t.date.startsWith(targetYear);
         });
     }
-    taxPaid = targetTx.filter(t => t.type === '税金').reduce((sum, t) => sum + t.amount, 0);
+    const taxPaid = targetTx.filter(t => t.type === '税金').reduce((sum, t) => sum + t.amount, 0);
     
-    let remainingReserve = Math.max(0, reserve - taxPaid);
+    let remainingReserve = Math.max(0, reserveToUse - taxPaid);
     
     return {
-        profit,
-        taxRateStr: taxRateObj.value === '' ? '未設定' : (taxRate * 100).toFixed(0) + '%',
-        totalReserveNeeded: reserve,
+        profit: actualProfit,
+        totalSales,
+        totalExpenses,
+        projectedProfit,
+        projectedSales,
+        taxMode, // 'manual' or 'auto'
+        taxRateStr: manualTaxRateStr,
+        totalReserveNeeded: reserveToUse,
         taxPaid,
-        remainingReserve
+        remainingReserve,
+        autoSim,
+        autoConfig,
+        daysPassedCalc: useAnnualProjection
     };
 }
 
