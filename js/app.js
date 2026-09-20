@@ -33,8 +33,17 @@ function setupNavigation() {
     });
 }
 
+let previousSectionId = 'dashboard';
+
 function showSection(id) {
     const sections = document.querySelectorAll('.page-section');
+    const currentActive = document.querySelector('.page-section.active');
+    
+    // settingsへ移動する場合は、現在の画面を記憶しておく
+    if (currentActive && currentActive.id !== 'settings' && id === 'settings') {
+        previousSectionId = currentActive.id;
+    }
+    
     sections.forEach(sec => sec.classList.remove('active'));
     document.getElementById(id).classList.add('active');
     
@@ -48,6 +57,25 @@ function showSection(id) {
     if (id === 'funds' && typeof loadFunds === 'function') loadFunds();
     if (id === 'settings' && typeof loadSettings === 'function') loadSettings();
 }
+
+window.goToSettings = function() {
+    const navBtn = document.querySelector('.nav-btn[data-target="settings"]');
+    if (navBtn) navBtn.click();
+    
+    // Wait for the async render of settings page to finish
+    setTimeout(() => {
+        const target = document.querySelector('#settings h3'); // Target the "税金・資金計算モード" header
+        if (target) {
+            target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+    }, 150);
+};
+
+window.returnFromSettings = function() {
+    const navBtn = document.querySelector(`.nav-btn[data-target="${previousSectionId}"]`);
+    if (navBtn) navBtn.click();
+    else showSection(previousSectionId);
+};
 
 // --- POS Logic ---
 let cart = [];

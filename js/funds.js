@@ -39,8 +39,8 @@ async function loadFunds(silent = false) {
         taxHtml = `
             <div style="background:#fff3cd; color:#856404; padding:1rem; border-radius:4px; font-size:0.9rem; text-align:center;">
                 <p style="font-weight:bold; margin-bottom: 0.5rem;">税金目安の設定が必要です</p>
-                <p style="margin-bottom: 1rem;">下部の「設定・データ管理」セクションにて、税金計算モード（自動・手動）を選択し、設定を保存してください。</p>
-                <button onclick="document.getElementById('settings-auto').scrollIntoView({behavior: 'smooth'})" class="btn-primary" style="padding: 0.5rem 1rem; width: auto; font-size: 0.8rem;">設定エリアへ移動</button>
+                <p style="margin-bottom: 1rem;">設定画面で計算方法を選択してください</p>
+                <button onclick="goToSettings()" class="btn-primary" style="padding: 0.5rem 1rem; width: auto; font-size: 0.8rem;">設定エリアへ移動</button>
             </div>
         `;
     } else if (taxData.taxMode === 'auto') {
@@ -577,6 +577,10 @@ async function saveSettings() {
         loadFunds(false);
         loadSettings();
         loadFunds(true); // Assuming loadFunds supports silent mode or we just let it be updated on tab switch
+        
+        if (typeof returnFromSettings === 'function') {
+            returnFromSettings();
+        }
     } catch(e) {
         console.error(e);
         alert('保存に失敗しました。');

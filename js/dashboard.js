@@ -143,7 +143,7 @@ async function loadDashboard() {
                     <span style="color:#888; font-weight:bold;">— (設定が必要)</span>
                 </div>
                 <div style="text-align:right; margin-bottom: 0.5rem;">
-                    <button onclick="showSection('funds')" class="btn-primary" style="padding: 0.25rem 0.75rem; font-size: 0.8rem; width:auto;">⚙️ 計算設定へ</button>
+                    <button onclick="goToSettings()" class="btn-primary" style="padding: 0.25rem 0.75rem; font-size: 0.8rem; width:auto;">⚙️ 計算設定へ</button>
                 </div>
             ` : `
                 <div style="display:flex; justify-content:space-between; margin-bottom: 0.5rem;">
