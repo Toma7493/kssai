@@ -9,73 +9,78 @@ async function loadExpenses() {
     
     const expensesSection = document.getElementById('expenses');
     expensesSection.innerHTML = `
-        <h2 style="margin-bottom: 1.5rem;">経費入力・履歴</h2>
-        <div class="grid expenses-grid">
-            <div class="card">
-                <h3>新規経費登録</h3>
-                <form id="expense-form" onsubmit="saveExpense(event)">
-                    <div style="margin-bottom: 1rem;">
-                        <label style="display:block; margin-bottom: 0.5rem;">発生日</label>
-                        <input type="date" id="exp-date" required style="width:100%; padding:0.5rem;">
+        <h2 style="margin-bottom: 1rem;">経費入力</h2>
+        <div class="card" style="margin-bottom: 2rem;">
+            <form id="expense-form" onsubmit="saveExpense(event)">
+                <div style="margin-bottom: 1.5rem;">
+                    <label style="display:block; margin-bottom: 0.5rem; font-weight: bold;">金額 (円)</label>
+                    <input type="number" id="exp-amount" min="1" required style="width:100%; padding: 1rem; font-size: 1.5rem; border: 1px solid var(--border-color); border-radius: 8px;" placeholder="0">
+                </div>
+                
+                <div style="margin-bottom: 1.5rem;">
+                    <label style="display:block; margin-bottom: 0.5rem; font-weight: bold;">カテゴリー</label>
+                    <select id="exp-category" required style="width:100%; padding: 1rem; font-size: 1.1rem; border: 1px solid var(--border-color); border-radius: 8px;">
+                        ${expensesCategories.map(c => `<option value="${c}">${c}</option>`).join('')}
+                    </select>
+                </div>
+                
+                <details style="margin-bottom: 1.5rem; border: 1px solid var(--border-color); border-radius: 8px; padding: 0.5rem 1rem;">
+                    <summary style="font-weight: bold; padding: 0.5rem 0; cursor: pointer;">詳細設定 (日付・支払元・メモ)</summary>
+                    <div style="margin-top: 1rem; border-top: 1px solid #eee; padding-top: 1rem;">
+                        <div style="margin-bottom: 1rem;">
+                            <label style="display:block; margin-bottom: 0.5rem;">発生日</label>
+                            <input type="date" id="exp-date" required style="width:100%; padding: 0.75rem; border: 1px solid var(--border-color); border-radius: 4px; font-size: 1rem;">
+                        </div>
+                        
+                        <div style="margin-bottom: 1rem;">
+                            <label style="display:flex; align-items:center; font-weight:bold; font-size:1.1rem;">
+                                <input type="checkbox" id="exp-paid" checked onchange="document.getElementById('exp-account-div').style.display = this.checked ? 'block' : 'none'" style="width: 24px; height: 24px; margin-right: 0.5rem;">
+                                支払済み
+                            </label>
+                        </div>
+                        
+                        <div id="exp-account-div" style="margin-bottom: 1rem;">
+                            <label style="display:block; margin-bottom: 0.5rem;">支払元口座</label>
+                            <select id="exp-account" style="width:100%; padding: 0.75rem; border: 1px solid var(--border-color); border-radius: 4px; font-size: 1rem;">
+                                <option value="現金">現金</option>
+                                <option value="銀行A">銀行A</option>
+                                <option value="個人の立替">個人の立替</option>
+                            </select>
+                        </div>
+                        
+                        <div style="margin-bottom: 1rem;">
+                            <label style="display:block; margin-bottom: 0.5rem;">内容・メモ</label>
+                            <input type="text" id="exp-memo" placeholder="購入した店舗名など" style="width:100%; padding: 0.75rem; border: 1px solid var(--border-color); border-radius: 4px; font-size: 1rem;">
+                        </div>
                     </div>
-                    <div style="margin-bottom: 1rem;">
-                        <label style="display:block; margin-bottom: 0.5rem;">カテゴリー</label>
-                        <select id="exp-category" required style="width:100%; padding:0.5rem;">
-                            ${expensesCategories.map(c => `<option value="${c}">${c}</option>`).join('')}
-                        </select>
+                </details>
+                
+                <button type="submit" class="btn-primary">経費を保存</button>
+            </form>
+        </div>
+        
+        <h2 style="margin-bottom: 1rem;">経費履歴 (最近20件)</h2>
+        <div>
+            ${expenses.slice(0, 20).map(e => `
+                <div class="card" style="margin-bottom: 0.5rem; padding: 1rem;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                        <span style="color: #666; font-size: 0.9rem;">${e.date}</span>
+                        ${e.is_paid ? '<span style="color:var(--text-color); font-size: 0.9rem;">支払済</span>' : '<span style="color:var(--accent-red); font-size: 0.9rem; font-weight:bold;">未払い</span>'}
                     </div>
-                    <div style="margin-bottom: 1rem;">
-                        <label style="display:block; margin-bottom: 0.5rem;">金額 (円)</label>
-                        <input type="number" id="exp-amount" min="1" required style="width:100%; padding:0.5rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-weight: bold; font-size: 1.1rem;">${e.category}</span>
+                        <span style="font-weight: bold; font-size: 1.2rem; color: var(--accent-red);">¥${e.amount.toLocaleString()}</span>
                     </div>
-                    <div style="margin-bottom: 1rem;">
-                        <label style="display:block; margin-bottom: 0.5rem;">支払済み</label>
-                        <input type="checkbox" id="exp-paid" checked onchange="document.getElementById('exp-account-div').style.display = this.checked ? 'block' : 'none'">
-                    </div>
-                    <div id="exp-account-div" style="margin-bottom: 1rem;">
-                        <label style="display:block; margin-bottom: 0.5rem;">支払元口座</label>
-                        <select id="exp-account" style="width:100%; padding:0.5rem;">
-                            <option value="現金">現金</option>
-                            <option value="銀行A">銀行A</option>
-                            <option value="個人の立替">個人の立替</option>
-                        </select>
-                    </div>
-                    <div style="margin-bottom: 1rem;">
-                        <label style="display:block; margin-bottom: 0.5rem;">内容・メモ</label>
-                        <input type="text" id="exp-memo" style="width:100%; padding:0.5rem;">
-                    </div>
-                    <button type="submit" style="width:100%; padding: 1rem; background: var(--accent-red); color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">登録</button>
-                </form>
-            </div>
-            
-            <div class="card">
-                <h3>経費履歴</h3>
-                <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem;">
-                    <thead>
-                        <tr style="border-bottom: 2px solid var(--border-color);">
-                            <th style="padding: 0.5rem;">日付</th>
-                            <th style="padding: 0.5rem;">カテゴリ</th>
-                            <th style="padding: 0.5rem;">金額</th>
-                            <th style="padding: 0.5rem;">状態</th>
-                        </tr>
-                    </thead>
-                    <tbody id="expense-table-body">
-                        ${expenses.map(e => `
-                            <tr style="border-bottom: 1px solid var(--border-color);">
-                                <td style="padding: 0.5rem;">${e.date}</td>
-                                <td style="padding: 0.5rem;">${e.category}</td>
-                                <td style="padding: 0.5rem;">¥${e.amount.toLocaleString()}</td>
-                                <td style="padding: 0.5rem;">${e.is_paid ? '支払済' : '<span style="color:var(--accent-red);">未払い</span>'}</td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
-            </div>
+                    ${e.memo ? `<div style="font-size: 0.9rem; margin-top: 0.5rem; color: #555;">${e.memo}</div>` : ''}
+                </div>
+            `).join('')}
+            ${expenses.length === 0 ? '<p style="color:#888;">経費データがありません</p>' : ''}
         </div>
     `;
     
     // Set today as default
-    document.getElementById('exp-date').value = new Date().toISOString().split('T')[0];
+    const todayStr = new Date().toLocaleDateString('sv-SE').split('T')[0]; // YYYY-MM-DD local time
+    document.getElementById('exp-date').value = todayStr;
 }
 
 async function saveExpense(e) {
@@ -83,6 +88,10 @@ async function saveExpense(e) {
     
     const is_paid = document.getElementById('exp-paid').checked;
     
+    const locName = document.getElementById('current-location-display') 
+                    ? document.getElementById('current-location-display').innerText 
+                    : 'メインキッチン';
+                    
     const expense = {
         id: 'e_' + Date.now(),
         date: document.getElementById('exp-date').value,
@@ -91,7 +100,7 @@ async function saveExpense(e) {
         is_paid: is_paid,
         account: is_paid ? document.getElementById('exp-account').value : null,
         memo: document.getElementById('exp-memo').value,
-        location: 'メインキッチン' // ToDo: support location logic
+        location: locName
     };
     
     try {
@@ -111,7 +120,7 @@ async function saveExpense(e) {
         }
         
         await tx.done;
-        alert('経費を登録しました。');
+        // alert('経費を登録しました。'); // Removed alert to make it faster to save
         loadExpenses();
     } catch (err) {
         console.error(err);

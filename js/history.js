@@ -6,112 +6,139 @@ async function loadHistory() {
     
     const historySection = document.getElementById('history');
     historySection.innerHTML = `
-        <h2 style="margin-bottom: 1.5rem;">売上履歴</h2>
-        <div class="card">
-            <table style="width: 100%; border-collapse: collapse; text-align: left;">
-                <thead>
-                    <tr style="border-bottom: 2px solid var(--border-color);">
-                        <th style="padding: 0.5rem;">日時</th>
-                        <th style="padding: 0.5rem;">出店場所</th>
-                        <th style="padding: 0.5rem;">金額</th>
-                        <th style="padding: 0.5rem;">支払方法</th>
-                        <th style="padding: 0.5rem;">状態</th>
-                        <th style="padding: 0.5rem;">操作</th>
-                    </tr>
-                </thead>
-                <tbody id="history-table-body">
-                </tbody>
-            </table>
-        </div>
+        <h2 style="margin-bottom: 1rem;">売上履歴 (最近50件)</h2>
+        <div id="history-list"></div>
     `;
     
-    renderHistoryTable();
+    renderHistoryCards();
 }
 
-function renderHistoryTable() {
-    const tbody = document.getElementById('history-table-body');
-    tbody.innerHTML = '';
+async function renderHistoryCards() {
+    const list = document.getElementById('history-list');
+    list.innerHTML = '';
     
-    allSales.forEach(sale => {
-        const tr = document.createElement('tr');
-        tr.style.borderBottom = '1px solid var(--border-color)';
+    if (allSales.length === 0) {
+        list.innerHTML = '<p style="color:#888;">売上データがありません</p>';
+        return;
+    }
+    
+    // We fetch items so we can show "Main products" on the card
+    const allItems = await db.getAll('sale_items');
+    
+    // Limit to 50 for performance on mobile
+    const recentSales = allSales.slice(0, 50);
+    
+    recentSales.forEach(sale => {
+        const saleItems = allItems.filter(i => i.sale_id === sale.id);
+        const mainItemText = saleItems.length > 0 
+            ? (saleItems[0].name + (saleItems.length > 1 ? ` 他${saleItems.length - 1}点` : ''))
+            : '商品なし';
+            
+        const dateObj = new Date(sale.date);
+        const dateStr = dateObj.toLocaleDateString('ja-JP', { month:'numeric', day:'numeric' }) + ' ' + dateObj.toLocaleTimeString('ja-JP', { hour:'2-digit', minute:'2-digit' });
         
-        const dateStr = new Date(sale.date).toLocaleString('ja-JP');
-        const statusStr = sale.refunded ? '<span style="color:var(--accent-red); font-weight:bold;">取消/返金</span>' : '正常';
+        const isRefunded = sale.refunded;
         
-        tr.innerHTML = `
-            <td style="padding: 0.5rem;">${dateStr}</td>
-            <td style="padding: 0.5rem;">${sale.location}</td>
-            <td style="padding: 0.5rem;">¥${sale.total.toLocaleString()}</td>
-            <td style="padding: 0.5rem;">${sale.method}</td>
-            <td style="padding: 0.5rem;">${statusStr}</td>
-            <td style="padding: 0.5rem;">
-                <button onclick="viewSaleDetails('${sale.id}')" style="padding: 0.2rem 0.5rem; cursor: pointer;">詳細/取消</button>
-            </td>
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.style.cssText = `margin-bottom: 0.5rem; padding: 1rem; cursor: pointer; border-left: 4px solid ${isRefunded ? 'var(--accent-red)' : 'var(--accent-green)'};`;
+        
+        card.innerHTML = `
+            <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                <span style="color: #666; font-size: 0.9rem;">${dateStr}</span>
+                ${isRefunded ? '<span style="color:var(--accent-red); font-size: 0.9rem; font-weight:bold;">取消/返金済</span>' : `<span style="color:#666; font-size: 0.9rem;">${sale.method}</span>`}
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-weight: bold; font-size: 1.05rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%;">${mainItemText}</span>
+                <span style="font-weight: bold; font-size: 1.2rem; ${isRefunded ? 'text-decoration: line-through; color: #888;' : ''}">¥${sale.total.toLocaleString()}</span>
+            </div>
+            <div style="font-size: 0.8rem; color: #888; margin-top: 0.25rem;">
+                ${sale.location}
+            </div>
         `;
-        tbody.appendChild(tr);
+        
+        card.onclick = () => viewSaleDetails(sale.id, saleItems);
+        list.appendChild(card);
     });
 }
 
-async function viewSaleDetails(saleId) {
+async function viewSaleDetails(saleId, preloadedItems) {
     const sale = allSales.find(s => s.id === saleId);
     if (!sale) return;
     
-    const items = await db.getAllFromIndex('sale_items', 'sale_id');
-    const saleItems = items.filter(i => i.sale_id === saleId);
+    let saleItems = preloadedItems;
+    if (!saleItems) {
+        const items = await db.getAllFromIndex('sale_items', 'sale_id');
+        saleItems = items.filter(i => i.sale_id === saleId);
+    }
     
-    const modal = document.createElement('div');
-    modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center; z-index: 1000;';
+    const overlay = document.createElement('div');
+    overlay.className = 'slide-panel-overlay';
     
     let itemsHtml = saleItems.map(si => `
         <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-            <span>${si.name} x ${si.quantity} ${si.toppings.length > 0 ? '(+' + si.toppings.map(t=>t.name).join(',') + ')' : ''}</span>
-            <span>¥${(si.unit_price * si.quantity + si.toppings.reduce((s,t)=>s+t.price,0)*si.quantity).toLocaleString()}</span>
+            <div>
+                <div style="font-weight: bold;">${si.name} <span style="font-weight: normal; color: #666;">x ${si.quantity}</span></div>
+                ${si.toppings && si.toppings.length > 0 ? `<div style="font-size: 0.85rem; color: #666;">+ ${si.toppings.map(t=>t.name).join(', ')}</div>` : ''}
+            </div>
+            <div style="font-weight: bold;">
+                ¥${(si.unit_price * si.quantity + (si.toppings||[]).reduce((s,t)=>s+t.price,0)*si.quantity).toLocaleString()}
+            </div>
         </div>
     `).join('');
     
-    modal.innerHTML = `
-        <div style="background: #fff; padding: 2rem; border-radius: var(--radius); width: 500px; max-width: 90%; max-height: 90vh; overflow-y: auto;">
-            <h3>会計詳細</h3>
-            <div style="margin: 1rem 0; color: #666; font-size: 0.9rem;">
-                日時: ${new Date(sale.date).toLocaleString('ja-JP')}<br>
-                場所: ${sale.location}<br>
-                支払: ${sale.method}
+    overlay.innerHTML = `
+        <div class="slide-panel">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 1.5rem;">
+                <h3 style="font-size: 1.2rem;">会計詳細</h3>
+                <button id="modal-close" style="background:none; border:none; font-size: 1.5rem; color: #888;">✕</button>
             </div>
-            <div style="margin: 1rem 0; padding: 1rem; background: #f9f9f9; border-radius: 4px;">
+            
+            <div style="margin-bottom: 1.5rem; color: #666; font-size: 0.95rem;">
+                <div>日時: ${new Date(sale.date).toLocaleString('ja-JP')}</div>
+                <div>場所: ${sale.location}</div>
+                <div>支払: ${sale.method}</div>
+                ${sale.refunded ? '<div style="color:var(--accent-red); font-weight:bold; margin-top: 0.5rem;">※この会計は取消されています</div>' : ''}
+            </div>
+            
+            <div style="margin-bottom: 1.5rem; padding: 1rem; background: #f9f9f9; border-radius: 8px;">
                 ${itemsHtml}
-                <hr style="margin: 0.5rem 0; border: none; border-top: 1px dashed #ccc;">
-                <div style="display: flex; justify-content: space-between; font-weight: bold;">
-                    <span>合計</span>
-                    <span>¥${sale.total.toLocaleString()}</span>
-                </div>
+                <hr style="margin: 1rem 0; border: none; border-top: 1px dashed #ccc;">
+                
                 ${sale.discount > 0 ? `
-                <div style="display: flex; justify-content: space-between; color: var(--accent-red);">
+                <div style="display: flex; justify-content: space-between; color: var(--accent-red); margin-bottom: 0.5rem;">
                     <span>値引き</span>
                     <span>-¥${sale.discount.toLocaleString()}</span>
                 </div>` : ''}
+                
                 ${sale.containerCount > 0 ? `
-                <div style="display: flex; justify-content: space-between;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
                     <span>容器代 (x${sale.containerCount})</span>
                     <span>¥${sale.containerTotal.toLocaleString()}</span>
                 </div>` : ''}
+                
+                <div style="display: flex; justify-content: space-between; font-weight: bold; font-size: 1.2rem;">
+                    <span>合計</span>
+                    <span style="${sale.refunded ? 'text-decoration: line-through;' : ''}">¥${sale.total.toLocaleString()}</span>
+                </div>
             </div>
             
-            <div style="display: flex; justify-content: flex-end; gap: 1rem; margin-top: 1.5rem;">
-                ${!sale.refunded ? `<button id="btn-refund" style="padding: 0.5rem 1rem; background: var(--accent-red); color: white; border: none; border-radius: 4px; cursor: pointer;">全額取消・返金</button>` : ''}
-                <button id="btn-close" style="padding: 0.5rem 1rem; cursor: pointer;">閉じる</button>
-            </div>
+            ${!sale.refunded ? `
+                <div style="margin-bottom: 1rem;">
+                    <button id="btn-refund" style="width: 100%; padding: 1rem; background: #fff; color: var(--accent-red); border: 1px solid var(--accent-red); border-radius: 8px; font-weight: bold; font-size: 1.1rem;">全額取消・返金</button>
+                </div>
+            ` : ''}
         </div>
     `;
     
-    document.body.appendChild(modal);
+    document.body.appendChild(overlay);
     
-    document.getElementById('btn-close').onclick = () => document.body.removeChild(modal);
+    document.getElementById('modal-close').onclick = () => document.body.removeChild(overlay);
     
     const btnRefund = document.getElementById('btn-refund');
     if (btnRefund) {
         btnRefund.onclick = async () => {
-            if (confirm('この会計を全額取消（返金）しますか？')) {
+            if (confirm(`合計 ¥${sale.total.toLocaleString()} を全額取消（返金）しますか？\n※この操作は元に戻せません。`)) {
                 try {
                     const tx = db.transaction(['sales', 'transactions'], 'readwrite');
                     
@@ -119,12 +146,11 @@ async function viewSaleDetails(saleId) {
                     sale.refunded = true;
                     saleStore.put(sale);
                     
-                    // Add refund transaction if cash
                     if (sale.method === '現金') {
                         tx.objectStore('transactions').put({
                             id: 'tx_refund_' + Date.now(),
                             date: new Date().toISOString(),
-                            type: '経費', // or '返金' logic, but subtracts from cash
+                            type: '経費', 
                             amount: sale.total,
                             account: '現金',
                             ref_id: sale.id,
@@ -134,7 +160,7 @@ async function viewSaleDetails(saleId) {
                     
                     await tx.done;
                     alert('取消処理が完了しました。');
-                    document.body.removeChild(modal);
+                    document.body.removeChild(overlay);
                     loadHistory();
                 } catch (e) {
                     console.error("Refund failed", e);

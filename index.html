@@ -11,24 +11,15 @@
 <body>
     <header class="app-header">
         <div class="logo">🍔🌮 名の無いタコスとバーガー屋</div>
-        <nav class="main-nav">
-            <button class="nav-btn active" data-target="dashboard">ダッシュボード</button>
-            <button class="nav-btn" data-target="pos">レジ (POS)</button>
-            <button class="nav-btn" data-target="history">売上履歴</button>
-            <button class="nav-btn" data-target="expenses">経費</button>
-            <button class="nav-btn" data-target="products">商品管理</button>
-            <button class="nav-btn" data-target="analytics">分析</button>
-            <button class="nav-btn" data-target="funds">資金・税金</button>
-            <button class="nav-btn" data-target="settings">設定</button>
-        </nav>
+        <div id="current-location-display" style="font-size: 0.9rem; color: #666; font-weight: bold;">メインキッチン</div>
     </header>
 
     <main class="app-main">
         <!-- 各画面のコンテナ -->
-        <section id="dashboard" class="page-section active">
+        <section id="dashboard" class="page-section">
             <!-- ダッシュボードの内容 -->
         </section>
-        <section id="pos" class="page-section">
+        <section id="pos" class="page-section active">
             <!-- レジ画面の内容 -->
         </section>
         <section id="history" class="page-section">
@@ -49,7 +40,34 @@
         <section id="settings" class="page-section">
             <!-- 設定の内容 -->
         </section>
+        <section id="more" class="page-section">
+            <h2 style="margin-bottom: 1.5rem;">その他メニュー</h2>
+            <div class="grid grid-cols-1">
+                <button onclick="showSection('products')" class="more-menu-btn">📦 商品管理</button>
+                <button onclick="showSection('analytics')" class="more-menu-btn">📊 分析</button>
+                <button onclick="showSection('funds')" class="more-menu-btn">💰 資金・税金</button>
+                <button onclick="showSection('settings')" class="more-menu-btn">⚙️ 設定・バックアップ</button>
+            </div>
+        </section>
     </main>
+
+    <nav class="bottom-nav">
+        <button class="nav-btn" data-target="dashboard">
+            <div style="font-size: 1.2rem;">🏠</div>ホーム
+        </button>
+        <button class="nav-btn active" data-target="pos">
+            <div style="font-size: 1.2rem;">📝</div>売上
+        </button>
+        <button class="nav-btn" data-target="expenses">
+            <div style="font-size: 1.2rem;">💸</div>経費
+        </button>
+        <button class="nav-btn" data-target="history">
+            <div style="font-size: 1.2rem;">🕒</div>履歴
+        </button>
+        <button class="nav-btn" data-target="more">
+            <div style="font-size: 1.2rem;">≡</div>その他
+        </button>
+    </nav>
 
     <script src="js/db.js"></script>
     <script src="js/dashboard.js"></script>
