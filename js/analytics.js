@@ -24,19 +24,26 @@ async function loadAnalytics() {
         <h2 style="margin-bottom: 1.5rem;">分析</h2>
         
         <div class="grid grid-cols-2">
-            <div class="card">
+            <div class="card" style="margin-bottom: 1rem;">
                 <h3>商品別販売数ランキング</h3>
-                <canvas id="qtyChart" height="200"></canvas>
+                <div class="chart-container">
+                    <canvas id="qtyChart"></canvas>
+                </div>
             </div>
-            <div class="card">
+            <div class="card" style="margin-bottom: 1rem;">
                 <h3>商品別売上ランキング</h3>
-                <canvas id="revChart" height="200"></canvas>
+                <div class="chart-container">
+                    <canvas id="revChart"></canvas>
+                </div>
             </div>
         </div>
     `;
     
+    if (window.qtyChartInstance) window.qtyChartInstance.destroy();
+    if (window.revChartInstance) window.revChartInstance.destroy();
+    
     if (sortedProducts.length > 0) {
-        new Chart(document.getElementById('qtyChart').getContext('2d'), {
+        window.qtyChartInstance = new Chart(document.getElementById('qtyChart').getContext('2d'), {
             type: 'bar',
             data: {
                 labels: sortedProducts.map(p => p.name),
@@ -46,11 +53,15 @@ async function loadAnalytics() {
                     backgroundColor: 'rgba(225, 173, 1, 0.6)'
                 }]
             },
-            options: { indexAxis: 'y' }
+            options: { 
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false
+            }
         });
         
         const sortedByRev = [...sortedProducts].sort((a,b) => b.revenue - a.revenue);
-        new Chart(document.getElementById('revChart').getContext('2d'), {
+        window.revChartInstance = new Chart(document.getElementById('revChart').getContext('2d'), {
             type: 'bar',
             data: {
                 labels: sortedByRev.map(p => p.name),
@@ -60,7 +71,11 @@ async function loadAnalytics() {
                     backgroundColor: 'rgba(139, 0, 0, 0.6)'
                 }]
             },
-            options: { indexAxis: 'y' }
+            options: { 
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false
+            }
         });
     }
 }

@@ -51,6 +51,7 @@ function showSection(id) {
 let cart = [];
 let currentProducts = [];
 let selectedCategory = 'すべて';
+let searchQuery = '';
 let containerCount = 0;
 
 function saveDraft() {
@@ -76,6 +77,7 @@ function loadDraft() {
 function clearDraft() {
     cart = [];
     containerCount = 0;
+    searchQuery = '';
     localStorage.removeItem('nameless_draft_cart');
     localStorage.removeItem('nameless_draft_containers');
 }
@@ -95,8 +97,8 @@ function renderPOSSection() {
     const categories = ['すべて', 'バーガー', 'タコス', 'サラダ・サイド', 'ドリンク', 'アルコール'];
     
     posSection.innerHTML = `
-        <div style="padding-bottom: 80px;">
-            <input type="text" id="pos-search" placeholder="商品名を検索..." style="width:100%; padding: 1rem; margin-bottom: 1rem; border: 1px solid var(--border-color); border-radius: 8px; font-size: 16px;">
+        <div style="padding-bottom: 120px;">
+            <input type="text" id="pos-search" placeholder="商品名を検索..." value="${searchQuery}" style="width:100%; padding: 1rem; margin-bottom: 1rem; border: 1px solid var(--border-color); border-radius: 8px; font-size: 16px;">
             
             <div style="display: flex; gap: 0.5rem; overflow-x: auto; padding-bottom: 1rem; margin-bottom: 1rem; -webkit-overflow-scrolling: touch; scrollbar-width: none;">
                 ${categories.map(c => `
@@ -111,8 +113,8 @@ function renderPOSSection() {
             </div>
         </div>
         
-        <!-- Bottom Action Bar for POS -->
-        <div style="position: fixed; bottom: env(safe-area-inset-bottom, 60px); left: 0; width: 100%; background: var(--card-bg); box-shadow: 0 -2px 10px rgba(0,0,0,0.1); padding: 1rem; display: flex; justify-content: space-between; align-items: center; z-index: 800; margin-bottom: 60px;">
+        <!-- Bottom Action Bar for POS (Positioned above the bottom-nav) -->
+        <div style="position: fixed; bottom: calc(60px + env(safe-area-inset-bottom)); left: 0; width: 100%; background: var(--card-bg); box-shadow: 0 -2px 10px rgba(0,0,0,0.1); padding: 1rem; display: flex; justify-content: space-between; align-items: center; z-index: 800;">
             <div style="display: flex; flex-direction: column;">
                 <span style="font-size: 0.9rem; color: #666;">${totalItems} 点</span>
                 <span style="font-size: 1.2rem; font-weight: bold; color: var(--text-color);">¥${totalPrice.toLocaleString()}</span>
@@ -132,11 +134,11 @@ function renderPOSSection() {
     });
     
     document.getElementById('pos-search').addEventListener('input', (e) => {
-        const query = e.target.value.toLowerCase();
-        renderProducts(query);
+        searchQuery = e.target.value.toLowerCase();
+        renderProducts(searchQuery);
     });
     
-    renderProducts('');
+    renderProducts(searchQuery);
 }
 
 function renderProducts(query) {

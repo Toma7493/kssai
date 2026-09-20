@@ -1,9 +1,6 @@
 async function loadFunds() {
     const fundsSection = document.getElementById('funds');
     const transactions = await db.getAll('transactions');
-    const settings = await db.getAll('settings');
-    const taxRateSetting = settings.find(s => s.key === 'tax_rate');
-    const taxRate = taxRateSetting ? taxRateSetting.value : 0;
     
     let cash = 0;
     let bank = 0;
@@ -20,18 +17,11 @@ async function loadFunds() {
     
     const totalFunds = cash + bank + other;
     
-    // Profit for tax (simplistic)
-    const sales = await db.getAll('sales');
-    const validSales = sales.filter(s => !s.refunded);
-    const expenses = await db.getAll('expenses');
-    const profit = validSales.reduce((s, x) => s + x.total, 0) - expenses.filter(e => e.is_paid).reduce((s, x) => s + x.amount, 0);
+    const jstNow = getJSTDate(new Date().toISOString());
+    const currentYearStr = formatYMD(jstNow).substring(0, 4);
+    const taxData = await calculateTaxReserve(db, currentYearStr);
     
-    let taxReserve = 0;
-    if (profit > 0 && taxRate > 0) {
-        taxReserve = Math.floor(profit * taxRate);
-    }
-    
-    const usableFunds = totalFunds - taxReserve;
+    const usableFunds = totalFunds - taxData.remainingReserve;
     
     fundsSection.innerHTML = `
         <h2 style="margin-bottom: 1.5rem;">資金・税金</h2>
@@ -43,7 +33,8 @@ async function loadFunds() {
             </div>
             <div class="card metric-card">
                 <h3>納税準備金 (目安)</h3>
-                <div class="value" style="color: var(--accent-red);">¥${taxReserve.toLocaleString()}</div>
+                <div class="value" style="color: var(--accent-red);">¥${taxData.remainingReserve.toLocaleString()}</div>
+                <div style="font-size:0.8rem; color:#888; margin-top:0.2rem;">税率: ${taxData.taxRateStr}</div>
             </div>
             <div class="card metric-card">
                 <h3>利用可能額 (目安)</h3>

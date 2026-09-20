@@ -105,3 +105,89 @@ async function populateInitialData(db) {
 
     await tx.done;
 }
+
+// --- Helper Functions (JST Timezone & Tax) ---
+
+/**
+ * Returns a new Date object representing the JST time of the given UTC ISO string.
+ * This ensures that regardless of the browser's local timezone, 
+ * the date is evaluated as Asia/Tokyo.
+ */
+function getJSTDate(dateString) {
+    const d = new Date(dateString);
+    if (isNaN(d.getTime())) return new Date(); // fallback
+    const jstString = d.toLocaleString('en-US', { timeZone: 'Asia/Tokyo', hour12: false });
+    const [datePart, timePart] = jstString.split(', ');
+    const [m, day, y] = datePart.split('/');
+    const [h, min, s] = (timePart || '00:00:00').split(':');
+    return new Date(y, m - 1, day, h, min, s);
+}
+
+/**
+ * Format Date as YYYY-MM-DD
+ */
+function formatYMD(dateObj) {
+    const y = dateObj.getFullYear();
+    const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+    const d = String(dateObj.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+}
+
+/**
+ * Common tax and profit calculator
+ */
+async function calculateTaxReserve(dbInstance, targetYear = null) {
+    const sales = await dbInstance.getAll('sales');
+    const expenses = await dbInstance.getAll('expenses');
+    const settings = await dbInstance.getAll('settings');
+    
+    const taxRateObj = settings.find(s => s.key === 'tax_rate') || { value: 0 };
+    // UI might have saved it as 20 for 20%, or 0.2. Let's assume it's saved as decimal (e.g. 0.2) or empty string.
+    let taxRate = 0;
+    if (taxRateObj.value !== '' && !isNaN(taxRateObj.value)) {
+        taxRate = parseFloat(taxRateObj.value);
+        if (taxRate > 1) taxRate = taxRate / 100; // Just in case it was saved as 20 instead of 0.2
+    }
+    
+    let validSales = sales.filter(s => !s.refunded);
+    let allExpensesForProfit = expenses; 
+    
+    if (targetYear) {
+        validSales = validSales.filter(s => formatYMD(getJSTDate(s.date)).startsWith(targetYear));
+        allExpensesForProfit = allExpensesForProfit.filter(e => {
+            // expenses date is stored as YYYY-MM-DD locally, but let's parse just in case
+            return e.date.startsWith(targetYear);
+        });
+    }
+    
+    const totalSales = validSales.reduce((sum, s) => sum + s.total, 0);
+    const totalExpenses = allExpensesForProfit.reduce((sum, e) => sum + e.amount, 0);
+    const profit = Math.max(0, totalSales - totalExpenses);
+    
+    let reserve = 0;
+    if (taxRateObj.value !== '') {
+        reserve = Math.floor(profit * taxRate);
+    }
+    
+    const transactions = await dbInstance.getAll('transactions');
+    let taxPaid = 0;
+    
+    let targetTx = transactions;
+    if (targetYear) {
+        targetTx = targetTx.filter(t => {
+            if (t.date.includes('T')) return formatYMD(getJSTDate(t.date)).startsWith(targetYear);
+            return t.date.startsWith(targetYear);
+        });
+    }
+    taxPaid = targetTx.filter(t => t.type === '税金').reduce((sum, t) => sum + t.amount, 0);
+    
+    let remainingReserve = Math.max(0, reserve - taxPaid);
+    
+    return {
+        profit,
+        taxRateStr: taxRateObj.value === '' ? '未設定' : (taxRate * 100).toFixed(0) + '%',
+        totalReserveNeeded: reserve,
+        taxPaid,
+        remainingReserve
+    };
+}
