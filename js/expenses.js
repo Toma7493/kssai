@@ -10,7 +10,7 @@ async function loadExpenses() {
     const expensesSection = document.getElementById('expenses');
     expensesSection.innerHTML = `
         <h2 style="margin-bottom: 1.5rem;">経費入力・履歴</h2>
-        <div class="grid" style="grid-template-columns: 1fr 2fr;">
+        <div class="grid expenses-grid">
             <div class="card">
                 <h3>新規経費登録</h3>
                 <form id="expense-form" onsubmit="saveExpense(event)">

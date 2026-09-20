@@ -53,7 +53,7 @@ async function loadPOSProducts() {
     currentProducts = await db.getAllFromIndex('products', 'order');
     const posSection = document.getElementById('pos');
     posSection.innerHTML = `
-        <div class="pos-container" style="display: flex; gap: 2rem;">
+        <div class="pos-container">
             <div class="product-selection" style="flex: 2;">
                 <h2>商品選択</h2>
                 <input type="text" id="pos-search" placeholder="商品名を検索..." style="width:100%; padding: 0.5rem; margin-bottom: 1rem; border: 1px solid var(--border-color); border-radius: 4px;">

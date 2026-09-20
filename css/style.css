@@ -118,3 +118,54 @@ body {
 .metric-card .value.negative {
     color: var(--accent-red);
 }
+
+/* Responsive adjustments */
+.pos-container {
+    display: flex;
+    gap: 2rem;
+}
+
+.expenses-grid {
+    grid-template-columns: 1fr 2fr;
+}
+
+@media (max-width: 768px) {
+    .app-header {
+        flex-direction: column;
+        padding: 1rem;
+    }
+    
+    .logo {
+        margin-bottom: 1rem;
+    }
+    
+    .main-nav {
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+    
+    .nav-btn {
+        padding: 0.5rem;
+        font-size: 0.9rem;
+    }
+    
+    .app-main {
+        padding: 1rem;
+    }
+    
+    .pos-container {
+        flex-direction: column;
+    }
+    
+    .grid-cols-3 {
+        grid-template-columns: 1fr;
+    }
+    
+    .expenses-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .card {
+        padding: 1rem;
+    }
+}
