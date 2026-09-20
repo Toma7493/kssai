@@ -139,22 +139,42 @@ async function viewSaleDetails(saleId, preloadedItems) {
     if (btnRefund) {
         btnRefund.onclick = async () => {
             if (confirm(`合計 ¥${sale.total.toLocaleString()} を全額取消（返金）しますか？\n※この操作は元に戻せません。`)) {
+                if (btnRefund.disabled) return;
+                btnRefund.disabled = true;
+                btnRefund.innerText = "処理中...";
                 try {
                     const tx = db.transaction(['sales', 'transactions'], 'readwrite');
                     
                     const saleStore = tx.objectStore('sales');
-                    sale.refunded = true;
-                    saleStore.put(sale);
+                    const currentSale = await saleStore.get(sale.id);
                     
-                    if (sale.method === '現金') {
+                    if (currentSale.refunded) {
+                        alert("既に取消されています。");
+                        return;
+                    }
+                    
+                    currentSale.refunded = true;
+                    saleStore.put(currentSale);
+                    
+                    if (currentSale.method === '現金') {
                         tx.objectStore('transactions').put({
                             id: 'tx_refund_' + Date.now(),
                             date: new Date().toISOString(),
                             type: '経費', 
-                            amount: sale.total,
+                            amount: currentSale.total,
                             account: '現金',
-                            ref_id: sale.id,
+                            ref_id: currentSale.id,
                             memo: '売上取消'
+                        });
+                    } else {
+                        tx.objectStore('transactions').put({
+                            id: 'tx_refund_' + Date.now(),
+                            date: new Date().toISOString(),
+                            type: '経費', 
+                            amount: currentSale.total,
+                            account: '未入金',
+                            ref_id: currentSale.id,
+                            memo: '売上取消: ' + currentSale.method
                         });
                     }
                     
@@ -165,6 +185,8 @@ async function viewSaleDetails(saleId, preloadedItems) {
                 } catch (e) {
                     console.error("Refund failed", e);
                     alert("取消処理に失敗しました。");
+                    btnRefund.disabled = false;
+                    btnRefund.innerText = "全額取消・返金";
                 }
             }
         };

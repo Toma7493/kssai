@@ -101,7 +101,7 @@ async function populateInitialData(db) {
     
     // Default Settings
     tx.objectStore('settings').put({ key: 'locations', value: ['メインキッチン', 'イベントA'] });
-    tx.objectStore('settings').put({ key: 'tax_rate', value: 0 }); // 納税用の積立率（例：0.1）
+    tx.objectStore('settings').put({ key: 'tax_rate', value: '' }); // 納税用の積立率（例：20）未設定は空文字
 
     await tx.done;
 }
@@ -141,12 +141,26 @@ async function calculateTaxReserve(dbInstance, targetYear = null) {
     const expenses = await dbInstance.getAll('expenses');
     const settings = await dbInstance.getAll('settings');
     
-    const taxRateObj = settings.find(s => s.key === 'tax_rate') || { value: 0 };
-    // UI might have saved it as 20 for 20%, or 0.2. Let's assume it's saved as decimal (e.g. 0.2) or empty string.
+    const taxRateObj = settings.find(s => s.key === 'tax_rate');
+    const configuredObj = settings.find(s => s.key === 'tax_rate_configured');
+    const isConfigured = configuredObj ? configuredObj.value : false;
+    
     let taxRate = 0;
-    if (taxRateObj.value !== '' && !isNaN(taxRateObj.value)) {
-        taxRate = parseFloat(taxRateObj.value);
-        if (taxRate > 1) taxRate = taxRate / 100; // Just in case it was saved as 20 instead of 0.2
+    let taxRateStr = '未設定';
+    
+    if (taxRateObj && taxRateObj.value !== '' && taxRateObj.value !== null) {
+        let val = parseFloat(taxRateObj.value);
+        if (!isNaN(val)) {
+            if (val === 0 && !isConfigured) {
+                taxRateStr = '未設定'; // 初期値0を未設定として扱う
+            } else if (val > 0 && val <= 1) {
+                taxRate = val; // 旧仕様の 0.2 等
+                taxRateStr = (val * 100).toFixed(0) + '%';
+            } else if (val >= 0) {
+                taxRate = val / 100; // 新仕様の 20 等
+                taxRateStr = val + '%';
+            }
+        }
     }
     
     let validSales = sales.filter(s => !s.refunded);
@@ -165,7 +179,7 @@ async function calculateTaxReserve(dbInstance, targetYear = null) {
     const profit = Math.max(0, totalSales - totalExpenses);
     
     let reserve = 0;
-    if (taxRateObj.value !== '') {
+    if (taxRateStr !== '未設定') {
         reserve = Math.floor(profit * taxRate);
     }
     
@@ -191,3 +205,60 @@ async function calculateTaxReserve(dbInstance, targetYear = null) {
         remainingReserve
     };
 }
+
+// --- Data Migration & Import ---
+
+async function migrateNonCashSales(dbInstance) {
+    const sales = await dbInstance.getAll('sales');
+    const transactions = await dbInstance.getAll('transactions');
+    
+    const tx = dbInstance.transaction('transactions', 'readwrite');
+    const store = tx.objectStore('transactions');
+    let migratedCount = 0;
+
+    for (const sale of sales) {
+        if (sale.method !== '現金' && !sale.refunded) {
+            // Check if transaction exists for this sale
+            const hasTx = transactions.some(t => t.ref_id === sale.id);
+            if (!hasTx) {
+                store.put({
+                    id: 'tx_ar_' + sale.id, // Ensure uniqueness
+                    date: sale.date, // Preserve original date
+                    type: '売上',
+                    amount: sale.total,
+                    account: '未入金', // Accounts Receivable
+                    ref_id: sale.id,
+                    memo: 'データ移行: ' + sale.method
+                });
+                migratedCount++;
+            }
+        }
+    }
+    await tx.done;
+    if (migratedCount > 0) {
+        console.log(`Migrated ${migratedCount} non-cash sales to Accounts Receivable (未入金)`);
+    }
+}
+
+async function importJSON(dbInstance, jsonString) {
+    try {
+        const data = JSON.parse(jsonString);
+        const stores = ['products', 'toppings', 'sales', 'sale_items', 'expenses', 'transactions', 'settings'];
+        const tx = dbInstance.transaction(stores, 'readwrite');
+        
+        for (const storeName of stores) {
+            if (data[storeName]) {
+                const store = tx.objectStore(storeName);
+                for (const item of data[storeName]) {
+                    store.put(item); // Overwrites duplicates by ID
+                }
+            }
+        }
+        await tx.done;
+        return true;
+    } catch (e) {
+        console.error("Import failed:", e);
+        return false;
+    }
+}
+

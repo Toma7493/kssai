@@ -65,7 +65,7 @@ async function loadExpenses() {
                 <div class="card" style="margin-bottom: 0.5rem; padding: 1rem;">
                     <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
                         <span style="color: #666; font-size: 0.9rem;">${e.date}</span>
-                        ${e.is_paid ? '<span style="color:var(--text-color); font-size: 0.9rem;">支払済</span>' : '<span style="color:var(--accent-red); font-size: 0.9rem; font-weight:bold;">未払い</span>'}
+                        ${e.is_paid ? '<span style="color:var(--text-color); font-size: 0.9rem;">支払済</span>' : `<button onclick="markExpensePaid('${e.id}', ${e.amount})" style="padding: 0.25rem 0.5rem; background: var(--accent-red); color: white; border: none; border-radius: 4px; font-size: 0.8rem; cursor: pointer;">未払い (支払う)</button>`}
                     </div>
                     <div style="display: flex; justify-content: space-between; align-items: center;">
                         <span style="font-weight: bold; font-size: 1.1rem;">${e.category}</span>
@@ -83,8 +83,18 @@ async function loadExpenses() {
     document.getElementById('exp-date').value = todayStr;
 }
 
+let expIsSubmitting = false;
+
 async function saveExpense(e) {
     e.preventDefault();
+    if (expIsSubmitting) return;
+    expIsSubmitting = true;
+    
+    const btnSubmit = e.target.querySelector('button[type="submit"]');
+    if (btnSubmit) {
+        btnSubmit.innerText = "保存中...";
+        btnSubmit.disabled = true;
+    }
     
     const is_paid = document.getElementById('exp-paid').checked;
     
@@ -124,6 +134,46 @@ async function saveExpense(e) {
         loadExpenses();
     } catch (err) {
         console.error(err);
-        alert('エラーが発生しました。');
+        alert('エラーが発生しました。入力内容は保持されています。');
+    } finally {
+        expIsSubmitting = false;
+        if (btnSubmit) {
+            btnSubmit.innerText = "経費を保存";
+            btnSubmit.disabled = false;
+        }
+    }
+}
+
+async function markExpensePaid(id, amount) {
+    const account = prompt(`未払経費 (¥${amount.toLocaleString()}) を支払います。\n支払元を入力してください（現金 / 銀行A / 個人の立替 など）`, '現金');
+    if (!account) return;
+    
+    try {
+        const tx = db.transaction(['expenses', 'transactions'], 'readwrite');
+        
+        const expStore = tx.objectStore('expenses');
+        const expense = await expStore.get(id);
+        
+        if (!expense || expense.is_paid) return;
+        
+        expense.is_paid = true;
+        expense.account = account;
+        expStore.put(expense);
+        
+        tx.objectStore('transactions').put({
+            id: 'tx_exp_late_' + Date.now(),
+            date: new Date().toISOString(),
+            type: '経費',
+            amount: expense.amount,
+            account: account,
+            ref_id: expense.id,
+            memo: expense.memo + ' (後日支払)'
+        });
+        
+        await tx.done;
+        loadExpenses();
+    } catch (err) {
+        console.error(err);
+        alert("支払処理に失敗しました。");
     }
 }

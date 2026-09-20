@@ -4,6 +4,7 @@ async function initApp() {
     try {
         db = await initDB();
         await populateInitialData(db);
+        await migrateNonCashSales(db);
         
         setupNavigation();
         loadDraft();
@@ -573,6 +574,15 @@ function openCheckoutModal() {
                     type: '売上',
                     amount: finalT,
                     account: '現金',
+                    ref_id: sale.id
+                });
+            } else {
+                tx.objectStore('transactions').put({
+                    id: 'tx_ar_' + Date.now(),
+                    date: sale.date,
+                    type: '売上',
+                    amount: finalT,
+                    account: '未入金',
                     ref_id: sale.id
                 });
             }

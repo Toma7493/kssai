@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>自動テスト実行 - 名の無いタコスとバーガー屋</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; line-height: 1.6; }
+        .pass { color: green; font-weight: bold; }
+        .fail { color: red; font-weight: bold; }
+        .test-case { margin-bottom: 20px; border-bottom: 1px solid #ccc; padding-bottom: 10px; }
+        #log { background: #f4f4f4; padding: 10px; border-radius: 5px; font-family: monospace; white-space: pre-wrap; }
+    </style>
+</head>
+<body>
+    <h1>会計ロジック テスト実行レポート</h1>
+    <div id="results"></div>
+    <h3>詳細ログ</h3>
+    <div id="log"></div>
+    
+    <!-- 必要なスクリプトの読み込み -->
+    <script src="https://cdn.jsdelivr.net/npm/idb@7/build/umd.js"></script>
+    <script>
+        // Override DB_NAME to use a clean test DB
+        window.DB_NAME = 'TestShopDB_' + Date.now();
+        window.DB_VERSION = 1;
+    </script>
+    <!-- Read the actual files -->
+    <script src="js/db.js"></script>
+    <script src="js/funds.js"></script>
+    <script src="js/app.js"></script>
+    <script src="js/expenses.js"></script>
+    
+    <script>
+        const resultsDiv = document.getElementById('results');
+        const logDiv = document.getElementById('log');
+        let dbInstance;
+        
+        function log(msg) {
+            console.log(msg);
+            logDiv.innerHTML += msg + '<br>';
+        }
+        
+        function assert(condition, testName, expected, actual) {
+            const el = document.createElement('div');
+            if (condition) {
+                el.innerHTML = `<span class="pass">✅ PASS</span> ${testName}`;
+                resultsDiv.appendChild(el);
+            } else {
+                el.innerHTML = `<span class="fail">❌ FAIL</span> ${testName} (Expected: ${expected}, Actual: ${actual})`;
+                resultsDiv.appendChild(el);
+            }
+        }
+
+        async function runTests() {
+            log('Initializing test database: ' + window.DB_NAME);
+            
+            // Re-define db variable for tests since app.js 'let db' might be scoped or uninitialized yet
+            dbInstance = await initDB();
+            await populateInitialData(dbInstance);
+            
+            // Reset tax rate to 20% for testing
+            await dbInstance.put('settings', { key: 'tax_rate', value: 20 });
+            await dbInstance.put('settings', { key: 'tax_rate_configured', value: true });
+            
+            log('Test A: 現金売上100,000円');
+            // Mock sale
+            let saleA = { id: 's_test_A', date: new Date().toISOString(), method: '現金', total: 100000, refunded: false };
+            let tx1 = dbInstance.transaction(['sales', 'transactions'], 'readwrite');
+            tx1.objectStore('sales').put(saleA);
+            tx1.objectStore('transactions').put({ id: 'tx_a', date: saleA.date, type: '売上', amount: 100000, account: '現金', ref_id: 's_test_A' });
+            await tx1.done;
+            
+            let taxDataA = await calculateTaxReserve(dbInstance, new Date().getFullYear().toString());
+            assert(taxDataA.profit === 100000, 'A. 利益は100,000円', 100000, taxDataA.profit);
+            assert(taxDataA.remainingReserve === 20000, 'A. 積立目安は20,000円 (20%)', 20000, taxDataA.remainingReserve);
+            
+            let allTxA = await dbInstance.getAll('transactions');
+            let cashA = allTxA.filter(t => t.account === '現金').reduce((sum, t) => sum + (t.type==='経費'?-t.amount:t.amount), 0);
+            assert(cashA === 100000, 'A. 現預金(現金)は100,000円', 100000, cashA);
+            assert((cashA - taxDataA.remainingReserve) === 80000, 'A. 差引利用可能額は80,000円', 80000, cashA - taxDataA.remainingReserve);
+
+            log('<br>Test B: Aに支払済み経費30,000円を追加');
+            let expB = { id: 'e_test_B', date: new Date().toISOString().split('T')[0], amount: 30000, is_paid: true, category: '消耗品費', account: '現金' };
+            let tx2 = dbInstance.transaction(['expenses', 'transactions'], 'readwrite');
+            tx2.objectStore('expenses').put(expB);
+            tx2.objectStore('transactions').put({ id: 'tx_b', date: new Date().toISOString(), type: '経費', amount: 30000, account: '現金', ref_id: 'e_test_B' });
+            await tx2.done;
+            
+            let taxDataB = await calculateTaxReserve(dbInstance, new Date().getFullYear().toString());
+            assert(taxDataB.profit === 70000, 'B. 利益は70,000円', 70000, taxDataB.profit);
+            assert(taxDataB.remainingReserve === 14000, 'B. 積立目安は14,000円', 14000, taxDataB.remainingReserve);
+            
+            let allTxB = await dbInstance.getAll('transactions');
+            let cashB = allTxB.filter(t => t.account === '現金').reduce((sum, t) => sum + (t.type==='経費'?-t.amount:t.amount), 0);
+            assert(cashB === 70000, 'B. 現預金(現金)は70,000円', 70000, cashB);
+            assert((cashB - taxDataB.remainingReserve) === 56000, 'B. 差引利用可能額は56,000円', 56000, cashB - taxDataB.remainingReserve);
+
+            log('<br>Test C: Bの売上を全額取消');
+            let tx3 = dbInstance.transaction(['sales', 'transactions'], 'readwrite');
+            saleA.refunded = true;
+            tx3.objectStore('sales').put(saleA);
+            tx3.objectStore('transactions').put({ id: 'tx_c', date: new Date().toISOString(), type: '経費', amount: 100000, account: '現金', ref_id: 's_test_A' });
+            await tx3.done;
+            
+            let taxDataC = await calculateTaxReserve(dbInstance, new Date().getFullYear().toString());
+            assert(taxDataC.profit === 0, 'C. 売上0円のため利益は0円 (マイナスは0丸め)', 0, taxDataC.profit);
+            assert(taxDataC.remainingReserve === 0, 'C. 積立は0円', 0, taxDataC.remainingReserve);
+            
+            let allTxC = await dbInstance.getAll('transactions');
+            let cashC = allTxC.filter(t => t.account === '現金').reduce((sum, t) => sum + (t.type==='経費'?-t.amount:t.amount), 0);
+            assert(cashC === -30000, 'C. 現預金は-30,000円 (0円へ丸めない)', -30000, cashC);
+
+            log('<br>Test D: カード売上100,000円と入金消込');
+            let saleD = { id: 's_test_D', date: new Date().toISOString(), method: 'クレジットカード', total: 100000, refunded: false };
+            let tx4 = dbInstance.transaction(['sales', 'transactions'], 'readwrite');
+            tx4.objectStore('sales').put(saleD);
+            tx4.objectStore('transactions').put({ id: 'tx_d', date: saleD.date, type: '売上', amount: 100000, account: '未入金', ref_id: 's_test_D' });
+            await tx4.done;
+            
+            let allTxD1 = await dbInstance.getAll('transactions');
+            let arD1 = allTxD1.filter(t => t.account === '未入金').reduce((sum, t) => sum + (t.type==='振替出金'?-t.amount:t.amount), 0);
+            assert(arD1 === 100000, 'D1. 未入金は100,000円', 100000, arD1);
+            
+            // 入金 97k (Fee 3k)
+            let tx5 = dbInstance.transaction(['transactions', 'expenses'], 'readwrite');
+            tx5.objectStore('transactions').put({ id: 'tx_dep_out', date: new Date().toISOString(), type: '振替出金', amount: 100000, account: '未入金' });
+            tx5.objectStore('transactions').put({ id: 'tx_dep_in', date: new Date().toISOString(), type: '振替入金', amount: 100000, account: '銀行A' });
+            tx5.objectStore('expenses').put({ id: 'exp_d', date: new Date().toISOString().split('T')[0], amount: 3000, category: '支払手数料', is_paid: true });
+            tx5.objectStore('transactions').put({ id: 'tx_dep_fee', date: new Date().toISOString(), type: '経費', amount: 3000, account: '銀行A' });
+            await tx5.done;
+            
+            let allTxD2 = await dbInstance.getAll('transactions');
+            let arD2 = allTxD2.filter(t => t.account === '未入金').reduce((sum, t) => sum + (t.type==='振替出金'?-t.amount:t.amount), 0);
+            assert(arD2 === 0, 'D2. 未入金は0円', 0, arD2);
+            
+            let bankD2 = allTxD2.filter(t => t.account === '銀行A').reduce((sum, t) => sum + ((t.type==='経費'||t.type==='振替出金')?-t.amount:t.amount), 0);
+            assert(bankD2 === 97000, 'D2. 銀行残高は97,000円', 97000, bankD2);
+            
+            let taxDataD2 = await calculateTaxReserve(dbInstance, new Date().getFullYear().toString());
+            // Sales: 100,000. Expenses: 30,000 (from B) + 3,000 (fee) = 33,000. Profit = 67,000
+            assert(taxDataD2.profit === 67000, 'D2. 利益は67,000円', 67000, taxDataD2.profit);
+            assert(taxDataD2.remainingReserve === 13400, 'D2. 積立目安は13,400円 (19400ではないのは経費30kがCで残っているため。条件通り10万-3.3万*20%)', 13400, taxDataD2.remainingReserve);
+            
+            log('<br>Test E: 積立率・不正値のバリデーション');
+            // db.js calculateTaxReserve directly parses 0-100 logic.
+            await dbInstance.put('settings', { key: 'tax_rate', value: 0.15 }); 
+            let taxDataE1 = await calculateTaxReserve(dbInstance, new Date().getFullYear().toString());
+            assert(taxDataE1.taxRateStr === '15%', 'E. 0.15は15%として解釈される', '15%', taxDataE1.taxRateStr);
+            
+            await dbInstance.put('settings', { key: 'tax_rate', value: 25 }); 
+            let taxDataE2 = await calculateTaxReserve(dbInstance, new Date().getFullYear().toString());
+            assert(taxDataE2.taxRateStr === '25%', 'E. 25は25%として解釈される', '25%', taxDataE2.taxRateStr);
+
+            await dbInstance.put('settings', { key: 'tax_rate', value: 0 }); 
+            await dbInstance.put('settings', { key: 'tax_rate_configured', value: false }); 
+            let taxDataE3 = await calculateTaxReserve(dbInstance, new Date().getFullYear().toString());
+            assert(taxDataE3.taxRateStr === '未設定', 'E. 0(未設定)は未設定と表示', '未設定', taxDataE3.taxRateStr);
+
+            await dbInstance.put('settings', { key: 'tax_rate_configured', value: true }); 
+            let taxDataE4 = await calculateTaxReserve(dbInstance, new Date().getFullYear().toString());
+            assert(taxDataE4.taxRateStr === '0%', 'E. 0(設定済)は0%と表示', '0%', taxDataE4.taxRateStr);
+
+            log('<br>テスト完了しました。');
+            
+            // Destroy test DB
+            window.idb.deleteDB(window.DB_NAME);
+        }
+        
+        runTests().catch(e => {
+            log('Error: ' + e);
+            console.error(e);
+        });
+    </script>
+</body>
+</html>
