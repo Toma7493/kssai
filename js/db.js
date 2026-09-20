@@ -225,21 +225,29 @@ async function calculateTaxReserve(dbInstance, targetYear = null, useAnnualProje
     // Auto Tax Simulation
     let autoSim = null;
     if (typeof simulateTaxes !== 'undefined') {
-        autoSim = simulateTaxes(projectedProfit, autoConfig);
+        autoSim = simulateTaxes(projectedProfit, autoConfig, targetYear || String(new Date().getFullYear()));
     }
     
     const reserveToUse = (taxMode === 'auto' && autoSim) ? autoSim.totalTax : manualReserve;
     
     // Tax Paid deduction
     const transactions = await dbInstance.getAll('transactions');
-    let targetTx = transactions;
+    let taxPaid = 0;
+    
     if (targetYear) {
-        targetTx = targetTx.filter(t => {
-            if (t.date.includes('T')) return formatYMD(getJSTDate(t.date)).startsWith(targetYear);
-            return t.date.startsWith(targetYear);
-        });
+        taxPaid = transactions.filter(t => {
+            if (t.type !== '税金') return false;
+            // 優先的に tax_year を確認。無ければ過去データ用として date を見る
+            if (t.tax_year) {
+                return t.tax_year === targetYear;
+            } else {
+                if (t.date.includes('T')) return formatYMD(getJSTDate(t.date)).startsWith(targetYear);
+                return t.date.startsWith(targetYear);
+            }
+        }).reduce((sum, t) => sum + t.amount, 0);
+    } else {
+        taxPaid = transactions.filter(t => t.type === '税金').reduce((sum, t) => sum + t.amount, 0);
     }
-    const taxPaid = targetTx.filter(t => t.type === '税金').reduce((sum, t) => sum + t.amount, 0);
     
     let remainingReserve = Math.max(0, reserveToUse - taxPaid);
     

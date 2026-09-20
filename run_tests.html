@@ -180,6 +180,43 @@
                 assert(taxDataF.autoSim.incomeTax >= 0, 'F. Income tax calculated', true, taxDataF.autoSim.incomeTax >= 0);
             }
             
+            log('<br>Test G: Cross-Year Tax Logic');
+            // Insert tax payment for 2026
+            await dbInstance.put('transactions', {
+                id: 'tx_tax_test1',
+                date: '2027-03-15',
+                type: '税金',
+                amount: 50000,
+                account: '現金',
+                tax_year: '2026'
+            });
+            // Manual mode for easy testing
+            await dbInstance.put('settings', { key: 'tax_calc_mode', value: 'manual' });
+            await dbInstance.put('settings', { key: 'tax_rate', value: 20 }); 
+            // Mock profit for 2026
+            await dbInstance.put('transactions', {
+                id: 'tx_sales_test2026',
+                date: '2026-12-01',
+                type: '現金売上',
+                amount: 500000,
+                account: '現金'
+            });
+            let taxDataG2026 = await calculateTaxReserve(dbInstance, '2026', false);
+            // Profit for 2026 = 500k. Manual 20% = 100k. Paid tax = 50k. Remaining = 50k.
+            assert(taxDataG2026.remainingReserve === 50000, 'G. 2026年の税金残高が50kになる (100k - 50k)', 50000, taxDataG2026.remainingReserve);
+            
+            // Mock profit for 2027
+            await dbInstance.put('transactions', {
+                id: 'tx_sales_test2027',
+                date: '2027-01-10',
+                type: '現金売上',
+                amount: 300000,
+                account: '現金'
+            });
+            let taxDataG2027 = await calculateTaxReserve(dbInstance, '2027', false);
+            // Profit for 2027 = 300k. Manual 20% = 60k. Paid tax for 2027 = 0. Remaining = 60k.
+            assert(taxDataG2027.remainingReserve === 60000, 'G. 2027年の税金残高は2026年の税金支払いに影響されない (60k)', 60000, taxDataG2027.remainingReserve);
+            
             log('<br>テスト完了しました。');
             
             // Destroy test DB

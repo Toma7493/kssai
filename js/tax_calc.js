@@ -38,9 +38,10 @@ function getIncomeTax(taxableIncome) {
  * 税額概算メイン関数
  * @param {number} profit 年間の事業所得(利益)
  * @param {object} config 税制設定オブジェクト
+ * @param {string} targetYear 対象所得年 (例: '2026')
  * @returns {object} 計算結果
  */
-function simulateTaxes(profit, config) {
+function simulateTaxes(profit, config, targetYear) {
     let result = {
         status: 'calculated',
         incomeTax: 0,
@@ -50,8 +51,11 @@ function simulateTaxes(profit, config) {
         consumptionTax: 0,
         totalTax: 0,
         warnings: [],
-        notCalculated: []
+        notCalculated: [],
+        labels: {}
     };
+    
+    const paymentYear = parseInt(targetYear) + 1;
 
     if (config.businessType === '法人') {
         return {
@@ -75,9 +79,11 @@ function simulateTaxes(profit, config) {
     
     // -- 所得税 --
     result.incomeTax = getIncomeTax(taxableIncome);
+    result.labels.incomeTax = `${targetYear}年分所得税／原則${paymentYear}年申告・納付`;
     
     // -- 復興特別所得税 --
     result.reconstructionTax = Math.floor(result.incomeTax * RECONSTRUCTION_TAX_RATE);
+    result.labels.reconstructionTax = `${targetYear}年分復興特別所得税／原則${paymentYear}年申告・納付`;
     
     // -- 住民税 --
     // ※住民税の基礎控除額は所得税(48万)と異なり43万ですが、簡易化のため同じ控除額をベースに計算します
@@ -87,28 +93,30 @@ function simulateTaxes(profit, config) {
     } else {
         result.residentTax = profit > 0 ? RESIDENT_TAX_PER_CAPITA : 0; // 均等割のみ
     }
+    result.labels.residentTax = `${paymentYear}年度住民税／原則${paymentYear}年6月以降納付`;
 
     // -- 個人事業税 --
     // 事業主控除290万円
     // 飲食業は第1種事業(5%)
     const enterpriseTaxable = Math.max(0, profit - ENTERPRISE_TAX_DEDUCTION);
     result.enterpriseTax = Math.floor(enterpriseTaxable * ENTERPRISE_TAX_RATE);
+    result.labels.enterpriseTax = `${targetYear}年分個人事業税／原則${paymentYear}年8月・11月納付`;
     
     // -- 消費税 --
     if (config.consumptionTaxType === '免税') {
         result.consumptionTax = 0;
+        result.labels.consumptionTax = `${targetYear}年分消費税 (免税)`;
     } else if (config.consumptionTaxType === '簡易課税') {
-        // 飲食業は第4種事業 (みなし仕入率60%) -> 納税は売上消費税の40%
-        // 売上(税込)から逆算: 売上 * (10/110) * 0.4
-        // ※軽減税率(8%)を考慮していないため概算
-        const totalSales = profit + (parseInt(config.estimatedExpenses) || 0); // Profit = Sales - Exp => Sales = Profit + Exp
+        const totalSales = profit + (parseInt(config.estimatedExpenses) || 0);
         const salesTax = totalSales * (10 / 110);
         result.consumptionTax = Math.floor(salesTax * 0.4);
         result.warnings.push('消費税(簡易課税)は全額10%・第4種事業(飲食)として大まかに計算しています。');
+        result.labels.consumptionTax = `${targetYear}年分消費税／原則${paymentYear}年申告・納付`;
     } else if (config.consumptionTaxType === '本則課税') {
         result.consumptionTax = 0;
         result.notCalculated.push('消費税(本則課税)');
         result.warnings.push('本則課税の消費税は、品目ごとの税率や適格請求書の判定が必要なため未計算です。');
+        result.labels.consumptionTax = `${targetYear}年分消費税／未計算`;
     }
 
     result.totalTax = result.incomeTax + result.reconstructionTax + result.residentTax + result.enterpriseTax + result.consumptionTax;

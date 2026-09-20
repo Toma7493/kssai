@@ -131,13 +131,14 @@ async function loadDashboard() {
         </div>
         
         <div class="card" style="margin-bottom: 1rem; background: #fff5f5; border: 1px solid #ffcccc;">
-            <h3 style="margin-bottom: 1rem; color: var(--accent-red);">資金と税金の目安</h3>
+            <h3 style="margin-bottom: 0.2rem; color: var(--accent-red);">${parseInt(currentYearStr)+1}年の納税に備える目安</h3>
+            <div style="font-size: 0.85rem; color: #666; margin-bottom: 1rem;">${currentYearStr}年の所得に基づく概算</div>
             <div style="display:flex; justify-content:space-between; margin-bottom: 0.5rem;">
                 <span style="color:#666;">現預金残高</span>
                 <span style="font-weight:bold;">¥${currentFunds.toLocaleString()}</span>
             </div>
             <div style="display:flex; justify-content:space-between; margin-bottom: 0.5rem;">
-                <span style="color:#666;">納税積立目安 (${taxData.taxRateStr})</span>
+                <span style="color:#666;">${taxData.taxMode === 'auto' ? '税額概算' : '納税用の取り置き目安'} (${taxData.taxRateStr})</span>
                 <span style="color:var(--accent-red); font-weight:bold;">-¥${taxData.remainingReserve.toLocaleString()}</span>
             </div>
             <hr style="border:0; border-top:1px dashed #ffcccc; margin:0.5rem 0;">

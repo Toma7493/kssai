@@ -1,6 +1,7 @@
 let accountsReceivable = 0;
 
 let currentFundsTab = 'actual'; // 'actual' or 'projected'
+let selectedFundsYear = null;
 
 async function loadFunds(silent = false) {
     if (!document.getElementById('funds')) return; // Just in case
@@ -30,11 +31,15 @@ async function loadFunds(silent = false) {
     const unpaidExpenses = expenses.filter(e => !e.is_paid).reduce((sum, e) => sum + e.amount, 0);
     
     const jstNow = getJSTDate(new Date().toISOString());
-    const currentYearStr = formatYMD(jstNow).substring(0, 4);
+    const realCurrentYearStr = formatYMD(jstNow).substring(0, 4);
+    
+    if (!selectedFundsYear) {
+        selectedFundsYear = realCurrentYearStr;
+    }
     
     // Tax Calculation (Auto or Manual)
     const isProjected = currentFundsTab === 'projected';
-    const taxData = await calculateTaxReserve(db, currentYearStr, isProjected);
+    const taxData = await calculateTaxReserve(db, selectedFundsYear, isProjected);
     
     // 利用可能額 = 現預金 + 未入金 - 未払経費 - 納税準備金
     // ※未入金は将来の現預金、未払経費は将来の流出なので含めるのが実態に近い
@@ -56,24 +61,39 @@ async function loadFunds(silent = false) {
                 ${warnHtml}
                 <table style="width:100%; text-align:left; font-size:0.95rem; margin-bottom:0.5rem; border-collapse: collapse;">
                     <tr style="border-bottom: 1px solid #eee;">
-                        <td style="padding:0.25rem 0; color:#555;">所得税</td>
-                        <td style="padding:0.25rem 0; text-align:right;">¥${sim.incomeTax.toLocaleString()}</td>
+                        <td style="padding:0.25rem 0; color:#555;">
+                            <div style="font-weight:bold;">所得税</div>
+                            <div style="font-size:0.75rem; color:#888;">${sim.labels.incomeTax}</div>
+                        </td>
+                        <td style="padding:0.25rem 0; text-align:right; vertical-align:top;">¥${sim.incomeTax.toLocaleString()}</td>
                     </tr>
                     <tr style="border-bottom: 1px solid #eee;">
-                        <td style="padding:0.25rem 0; color:#555;">復興特別所得税</td>
-                        <td style="padding:0.25rem 0; text-align:right;">¥${sim.reconstructionTax.toLocaleString()}</td>
+                        <td style="padding:0.25rem 0; color:#555;">
+                            <div style="font-weight:bold;">復興特別所得税</div>
+                            <div style="font-size:0.75rem; color:#888;">${sim.labels.reconstructionTax}</div>
+                        </td>
+                        <td style="padding:0.25rem 0; text-align:right; vertical-align:top;">¥${sim.reconstructionTax.toLocaleString()}</td>
                     </tr>
                     <tr style="border-bottom: 1px solid #eee;">
-                        <td style="padding:0.25rem 0; color:#555;">住民税</td>
-                        <td style="padding:0.25rem 0; text-align:right;">¥${sim.residentTax.toLocaleString()}</td>
+                        <td style="padding:0.25rem 0; color:#555;">
+                            <div style="font-weight:bold;">住民税</div>
+                            <div style="font-size:0.75rem; color:#888;">${sim.labels.residentTax}</div>
+                        </td>
+                        <td style="padding:0.25rem 0; text-align:right; vertical-align:top;">¥${sim.residentTax.toLocaleString()}</td>
                     </tr>
                     <tr style="border-bottom: 1px solid #eee;">
-                        <td style="padding:0.25rem 0; color:#555;">個人事業税</td>
-                        <td style="padding:0.25rem 0; text-align:right;">¥${sim.enterpriseTax.toLocaleString()}</td>
+                        <td style="padding:0.25rem 0; color:#555;">
+                            <div style="font-weight:bold;">個人事業税</div>
+                            <div style="font-size:0.75rem; color:#888;">${sim.labels.enterpriseTax}</div>
+                        </td>
+                        <td style="padding:0.25rem 0; text-align:right; vertical-align:top;">¥${sim.enterpriseTax.toLocaleString()}</td>
                     </tr>
                     <tr style="border-bottom: 1px solid #eee;">
-                        <td style="padding:0.25rem 0; color:#555;">消費税</td>
-                        <td style="padding:0.25rem 0; text-align:right;">¥${sim.consumptionTax.toLocaleString()}</td>
+                        <td style="padding:0.25rem 0; color:#555;">
+                            <div style="font-weight:bold;">消費税</div>
+                            <div style="font-size:0.75rem; color:#888;">${sim.labels.consumptionTax}</div>
+                        </td>
+                        <td style="padding:0.25rem 0; text-align:right; vertical-align:top;">¥${sim.consumptionTax.toLocaleString()}</td>
                     </tr>
                 </table>
                 <div style="text-align:right; font-weight:bold; font-size:1.1rem; border-top: 2px solid #ddd; padding-top: 0.5rem;">
@@ -100,8 +120,18 @@ async function loadFunds(silent = false) {
     const targetSales = isProjected ? taxData.projectedSales : taxData.totalSales;
     const targetExpenses = isProjected ? (taxData.autoConfig?.estimatedExpenses || 0) : taxData.totalExpenses;
 
+    const baseYearNum = parseInt(realCurrentYearStr);
+    const yearOptions = [baseYearNum - 2, baseYearNum - 1, baseYearNum, baseYearNum + 1].map(y => {
+        return `<option value="${y}" ${parseInt(selectedFundsYear) === y ? 'selected' : ''}>${y}年</option>`;
+    }).join('');
+
     let html = `
-        <h2 style="margin-bottom: 1.5rem;">資金・税金ダッシュボード</h2>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 1.5rem;">
+            <h2 style="margin: 0;">資金・税金ダッシュボード</h2>
+            <select id="funds-year-selector" onchange="changeFundsYear(this.value)" style="padding:0.5rem; border:1px solid #ccc; border-radius:4px; font-size:1rem;">
+                ${yearOptions}
+            </select>
+        </div>
         
         <!-- Tabs -->
         <div style="display:flex; margin-bottom: 1.5rem; background:#eee; border-radius:8px; padding:0.25rem;">
@@ -140,9 +170,13 @@ async function loadFunds(silent = false) {
         
         <div class="grid grid-cols-2" style="margin-bottom: 1.5rem;">
             <div class="card">
-                <h3>税金概算と内訳 (${isProjected ? '年間見込み' : '現状実績'})</h3>
+                <h3 style="margin-bottom: 0.2rem; color: var(--accent-red);">${parseInt(selectedFundsYear)+1}年の納税に備える目安</h3>
+                <div style="font-size: 0.85rem; color: #666; margin-bottom: 1rem;">${selectedFundsYear}年の所得に基づく概算 ${isProjected ? '(年間見込み)' : '(今年ここまでの実績)'}</div>
                 <hr style="margin: 0.75rem 0; border-top:1px solid #eee;">
                 ${taxHtml}
+                <div style="margin-top: 1rem; text-align: center;">
+                    <button onclick="openTaxPaymentModal('${selectedFundsYear}')" class="btn-primary" style="padding: 0.5rem 1rem; width: auto; font-size: 0.9rem;">税金の支払いを記録する</button>
+                </div>
             </div>
             
             <div>
@@ -171,6 +205,11 @@ async function loadFunds(silent = false) {
 
 window.switchFundsTab = function(tab) {
     currentFundsTab = tab;
+    loadFunds(false);
+};
+
+window.changeFundsYear = function(year) {
+    selectedFundsYear = year;
     loadFunds(false);
 };
 
