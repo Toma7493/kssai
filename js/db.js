@@ -151,7 +151,9 @@ async function calculateTaxReserve(dbInstance, targetYear = null, useAnnualProje
     
     // --- Manual Calculation Setup ---
     const taxRateObj = settings.find(s => s.key === 'tax_rate');
-    const isConfigured = getSet('tax_rate_configured', false);
+    const taxRateVersionObj = settings.find(s => s.key === 'tax_rate_version');
+    const isConfiguredVal = getSet('tax_rate_configured', false);
+    let isConfigured = isConfiguredVal;
     
     let manualTaxRate = 0;
     let manualTaxRateStr = '未設定';
@@ -161,12 +163,22 @@ async function calculateTaxReserve(dbInstance, targetYear = null, useAnnualProje
         if (!isNaN(val)) {
             if (val === 0 && !isConfigured) {
                 manualTaxRateStr = '未設定';
-            } else if (val > 0 && val <= 1) {
-                manualTaxRate = val; 
-                manualTaxRateStr = (val * 100).toFixed(0) + '%';
-            } else if (val >= 0) {
-                manualTaxRate = val / 100;
-                manualTaxRateStr = val + '%';
+            } else {
+                const ver = taxRateVersionObj ? parseInt(taxRateVersionObj.value) : 1;
+                if (ver === 1 && val > 0 && val <= 1) {
+                    // Old fractional format is ambiguous (did they mean 0.2% or 20%?). Force reconfiguration.
+                    manualTaxRate = 0;
+                    manualTaxRateStr = '再設定が必要';
+                    isConfigured = false;
+                } else if (ver === 1 && val > 1) {
+                    // Old format but inputted as percentage (e.g. 20)
+                    manualTaxRate = val / 100;
+                    manualTaxRateStr = val + '%';
+                } else {
+                    // Version 2 strictly uses percentage (0-100)
+                    manualTaxRate = val / 100;
+                    manualTaxRateStr = val + '%';
+                }
             }
         }
     }
@@ -272,6 +284,70 @@ async function calculateTaxReserve(dbInstance, targetYear = null, useAnnualProje
     };
 }
 
+// --- Financial Summaries ---
+
+/**
+ * 資金残高の集計 (現預金、未入金売掛金、未払経費)
+ */
+async function getBalanceSummary(dbInstance) {
+    const transactions = await dbInstance.getAll('transactions');
+    const expenses = await dbInstance.getAll('expenses');
+    
+    let cash = 0;
+    let bank = 0;
+    let accountsReceivable = 0;
+    
+    transactions.forEach(t => {
+        const amount = parseFloat(t.amount) || 0;
+        
+        if (t.account === '現金') {
+            if (t.type === '売上' || t.type === '振替入金' || t.type === '自己資金' || t.type === '返金受取') cash += amount;
+            if (t.type === '経費' || t.type === '振替出金' || t.type === '税金' || t.type === '生活費') cash -= amount;
+        } else if (t.account && t.account.startsWith('銀行')) {
+            if (t.type === '売上' || t.type === '振替入金' || t.type === '自己資金' || t.type === '返金受取') bank += amount;
+            if (t.type === '経費' || t.type === '振替出金' || t.type === '税金' || t.type === '生活費') bank -= amount;
+        } else if (t.account === '未入金') {
+            if (t.type === '売上') accountsReceivable += amount; 
+            if (t.type === '振替出金' || t.type === '経費') accountsReceivable -= amount; 
+        }
+    });
+    
+    const unpaidExpenses = expenses.filter(e => !e.is_paid).reduce((sum, e) => sum + (parseFloat(e.amount) || 0), 0);
+    
+    return {
+        cash,
+        bank,
+        currentFunds: cash + bank,
+        accountsReceivable,
+        unpaidExpenses
+    };
+}
+
+/**
+ * 全年度の未納税金残高を計算
+ */
+async function getTotalUnpaidTaxReserve(dbInstance) {
+    const sales = await dbInstance.getAll('sales');
+    const transactions = await dbInstance.getAll('transactions');
+    
+    const years = new Set();
+    const currentYear = formatYMD(getJSTDate(new Date().toISOString())).substring(0, 4);
+    years.add(currentYear); // Always include current year
+    
+    sales.forEach(s => {
+        if (!s.refunded) years.add(formatYMD(getJSTDate(s.date)).substring(0, 4));
+    });
+    
+    let totalNeeded = 0;
+    for (const year of years) {
+        const res = await calculateTaxReserve(dbInstance, year, false);
+        totalNeeded += res.totalReserveNeeded;
+    }
+    
+    const totalPaid = transactions.filter(t => t.type === '税金').reduce((sum, t) => sum + (parseFloat(t.amount) || 0), 0);
+    return Math.max(0, totalNeeded - totalPaid);
+}
+
 // --- Data Migration & Import ---
 
 async function migrateNonCashSales(dbInstance) {
@@ -294,7 +370,9 @@ async function migrateNonCashSales(dbInstance) {
                     amount: sale.total,
                     account: '未入金', // Accounts Receivable
                     ref_id: sale.id,
-                    memo: 'データ移行: ' + sale.method
+                    memo: 'データ移行: ' + sale.method,
+                    clearance_status: 'unpaid',
+                    cleared_amount: 0
                 });
                 migratedCount++;
             }
@@ -304,6 +382,62 @@ async function migrateNonCashSales(dbInstance) {
     if (migratedCount > 0) {
         console.log(`Migrated ${migratedCount} non-cash sales to Accounts Receivable (未入金)`);
     }
+}
+
+/**
+ * 過去の未入金(どんぶり勘定)を、個別のトランザクション消込状態に変換する
+ */
+async function upgradeARTransactions(dbInstance) {
+    const transactions = await dbInstance.getAll('transactions');
+    let totalARGenerated = 0;
+    let totalARCleared = 0;
+    
+    const arTransactions = [];
+    
+    // 集計と分類
+    transactions.forEach(t => {
+        if (t.account === '未入金') {
+            const amount = parseFloat(t.amount) || 0;
+            if (t.type === '売上') {
+                totalARGenerated += amount;
+                if (!t.clearance_status) {
+                    arTransactions.push(t);
+                }
+            } else if (t.type === '振替出金' || t.type === '経費') {
+                totalARCleared += amount; // 過去のどんぶり消込や返金
+            }
+        }
+    });
+    
+    if (arTransactions.length === 0) return; // すでにマイグレーション済み、または対象なし
+    
+    // 古い順にソートして、消込済み金額を充当していく
+    arTransactions.sort((a, b) => new Date(a.date) - new Date(b.date));
+    
+    const tx = dbInstance.transaction('transactions', 'readwrite');
+    const store = tx.objectStore('transactions');
+    
+    let remainingClearedToAllocate = totalARCleared;
+    
+    for (const t of arTransactions) {
+        const amount = parseFloat(t.amount) || 0;
+        if (remainingClearedToAllocate >= amount) {
+            t.clearance_status = 'paid';
+            t.cleared_amount = amount;
+            remainingClearedToAllocate -= amount;
+        } else if (remainingClearedToAllocate > 0) {
+            t.clearance_status = 'partially_paid';
+            t.cleared_amount = remainingClearedToAllocate;
+            remainingClearedToAllocate = 0;
+        } else {
+            t.clearance_status = 'unpaid';
+            t.cleared_amount = 0;
+        }
+        store.put(t);
+    }
+    
+    await tx.done;
+    console.log("Upgraded AR Transactions with clearance statuses.");
 }
 
 async function importJSON(dbInstance, jsonString) {

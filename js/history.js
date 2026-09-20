@@ -167,15 +167,45 @@ async function viewSaleDetails(saleId, preloadedItems) {
                             memo: '売上取消'
                         });
                     } else {
-                        tx.objectStore('transactions').put({
-                            id: 'tx_refund_' + Date.now(),
-                            date: new Date().toISOString(),
-                            type: '経費', 
-                            amount: currentSale.total,
-                            account: '未入金',
-                            ref_id: currentSale.id,
-                            memo: '売上取消: ' + currentSale.method
-                        });
+                        // Find original AR transaction to adjust clearance status
+                        const allTxs = await tx.objectStore('transactions').getAll();
+                        const originalTx = allTxs.find(t => t.ref_id === currentSale.id && t.type === '売上' && t.account === '未入金');
+                        
+                        let unpaidPortion = currentSale.total;
+                        let clearedPortion = 0;
+                        
+                        if (originalTx) {
+                            clearedPortion = parseFloat(originalTx.cleared_amount) || 0;
+                            unpaidPortion = (parseFloat(originalTx.amount) || 0) - clearedPortion;
+                            
+                            originalTx.clearance_status = 'refunded';
+                            tx.objectStore('transactions').put(originalTx);
+                        }
+                        
+                        // Cancel out the unpaid AR
+                        if (unpaidPortion > 0) {
+                            tx.objectStore('transactions').put({
+                                id: 'tx_refund_ar_' + Date.now(),
+                                date: new Date().toISOString(),
+                                type: '経費', 
+                                amount: unpaidPortion,
+                                account: '未入金',
+                                ref_id: currentSale.id,
+                                memo: '売上取消(未入金分): ' + currentSale.method
+                            });
+                        }
+                        // Refund the cleared amount from the Bank
+                        if (clearedPortion > 0) {
+                            tx.objectStore('transactions').put({
+                                id: 'tx_refund_bank_' + Date.now(),
+                                date: new Date().toISOString(),
+                                type: '経費', 
+                                amount: clearedPortion,
+                                account: '銀行A',
+                                ref_id: currentSale.id,
+                                memo: '売上取消(入金済分): ' + currentSale.method
+                            });
+                        }
                     }
                     
                     await tx.done;

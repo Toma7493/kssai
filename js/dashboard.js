@@ -43,15 +43,14 @@ async function loadDashboard() {
     const avgTicket = filteredSales.length > 0 ? Math.floor(salesAmount / filteredSales.length) : 0;
     
     // Funds & Tax Reserve
-    const currentFunds = transactions.reduce((sum, t) => {
-        if (t.type === '売上' || t.type === '振替入金' || t.type === '自己資金') return sum + t.amount;
-        if (t.type === '経費' || t.type === '振替出金' || t.type === '税金' || t.type === '生活費') return sum - t.amount;
-        return sum;
-    }, 0);
+    const balance = await getBalanceSummary(db);
+    const currentFunds = balance.currentFunds;
     
-    // Use the shared tax reserve logic for the current year
+    // Calculate total unpaid tax reserve across all years
     const taxData = await calculateTaxReserve(db, currentYearStr);
-    const availableFunds = currentFunds - taxData.remainingReserve;
+    const totalUnpaidTax = await getTotalUnpaidTaxReserve(db);
+    
+    const availableFunds = currentFunds - balance.unpaidExpenses - totalUnpaidTax;
     
     // Top 5 products by product_id
     const saleItems = await db.getAll('sale_items');
@@ -140,7 +139,7 @@ async function loadDashboard() {
             
             ${!taxData.isConfigured ? `
                 <div style="display:flex; justify-content:space-between; margin-bottom: 0.5rem; align-items:center;">
-                    <span style="color:#666;">${taxData.taxMode === 'auto' ? '税額概算' : '設定率による取り置き目安'}</span>
+                    <span style="color:#666;">全年度 未納の納税準備額</span>
                     <span style="color:#888; font-weight:bold;">— (設定が必要)</span>
                 </div>
                 <div style="text-align:right; margin-bottom: 0.5rem;">
@@ -148,8 +147,8 @@ async function loadDashboard() {
                 </div>
             ` : `
                 <div style="display:flex; justify-content:space-between; margin-bottom: 0.5rem;">
-                    <span style="color:#666;">${taxData.taxMode === 'auto' ? '税額概算' : '設定率による取り置き目安'} (${taxData.taxMode === 'manual' ? taxData.taxRateStr : '自動'})</span>
-                    <span style="color:var(--accent-red); font-weight:bold;">-¥${taxData.remainingReserve.toLocaleString()}</span>
+                    <span style="color:#666;">全年度 未納の納税準備額</span>
+                    <span style="color:var(--accent-red); font-weight:bold;">-¥${totalUnpaidTax.toLocaleString()}</span>
                 </div>
             `}
             
@@ -157,12 +156,12 @@ async function loadDashboard() {
             <div style="display:flex; justify-content:space-between; align-items:center;">
                 <span style="font-weight:bold;">利用可能額の目安</span>
                 ${!taxData.isConfigured ? `
-                    <span style="font-weight:bold; font-size:1.1rem; color:#888;">計算保留 (納税分未控除)</span>
+                    <span style="font-weight:bold; font-size:1.1rem; color:#888;">計算保留 (未控除)</span>
                 ` : `
                     <span style="font-weight:bold; font-size:1.3rem; color:var(--accent-red);">¥${availableFunds.toLocaleString()}</span>
                 `}
             </div>
-            <p style="font-size:0.8rem; color:#888; margin-top:0.5rem;">※未払い経費などの将来支払い見込みをすべて控除した金額ではありません。</p>
+            <p style="font-size:0.8rem; color:#888; margin-top:0.5rem;">※未払い経費などの将来支払い見込み（¥${balance.unpaidExpenses.toLocaleString()}）および未納税金（¥${totalUnpaidTax.toLocaleString()}）を差し引いた金額です。</p>
         </div>
     `;
     

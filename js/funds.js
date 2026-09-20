@@ -10,25 +10,12 @@ async function loadFunds(silent = false) {
     const transactions = await db.getAll('transactions');
     const expenses = await db.getAll('expenses');
     
-    let cash = 0;
-    let bank = 0;
-    let other = 0;
-    accountsReceivable = 0;
-    
-    transactions.forEach(t => {
-        let amount = t.amount;
-        if (t.type === '経費' || t.type === '振替出金' || t.type === '税金' || t.type === '生活費') amount = -amount;
-        
-        if (t.account === '現金') cash += amount;
-        else if (t.account === '銀行A') bank += amount;
-        else if (t.account === '未入金') accountsReceivable += amount;
-        else other += amount;
-    });
-    
-    const totalFunds = cash + bank + other; // 現預金には未入金を含めない
-    
-    // 未払経費の計算
-    const unpaidExpenses = expenses.filter(e => !e.is_paid).reduce((sum, e) => sum + e.amount, 0);
+    const balance = await getBalanceSummary(db);
+    let cash = balance.cash;
+    let bank = balance.bank;
+    accountsReceivable = balance.accountsReceivable;
+    let unpaidExpenses = balance.unpaidExpenses;
+    const totalFunds = balance.currentFunds;
     
     const jstNow = getJSTDate(new Date().toISOString());
     const realCurrentYearStr = formatYMD(jstNow).substring(0, 4);
@@ -40,10 +27,11 @@ async function loadFunds(silent = false) {
     // Tax Calculation (Auto or Manual)
     const isProjected = currentFundsTab === 'projected';
     const taxData = await calculateTaxReserve(db, selectedFundsYear, isProjected);
+    const totalUnpaidTax = await getTotalUnpaidTaxReserve(db);
     
-    // 利用可能額 = 現預金 + 未入金 - 未払経費 - 納税準備金
-    // ※未入金は将来の現預金、未払経費は将来の流出なので含めるのが実態に近い
-    const usableFunds = (totalFunds + accountsReceivable) - unpaidExpenses - taxData.remainingReserve;
+    // 利用可能額 = 現預金 - 未払経費 - 未納の納税準備額 (全年度)
+    // ※ダッシュボードと一致させるため、未入金(売掛)は現預金から除外し、税金は全年度分を引く
+    const usableFunds = totalFunds - unpaidExpenses - totalUnpaidTax;
     
     // Render
     let taxHtml = '';
@@ -172,7 +160,7 @@ async function loadFunds(silent = false) {
             <div class="card metric-card" style="background:#f0fdf4; border-color:#bbf7d0;">
                 <h3>最終利用可能額</h3>
                 <div class="value" style="color: var(--accent-green);">¥${usableFunds.toLocaleString()}</div>
-                <div style="font-size:0.8rem; color:#666; margin-top:0.2rem;">現預金+未入金-未払-税金</div>
+                <div style="font-size:0.8rem; color:#666; margin-top:0.2rem;">現預金 - 未払 - 全年度税金</div>
             </div>
         </div>
         
@@ -221,39 +209,64 @@ window.changeFundsYear = function(year) {
     loadFunds(false);
 };
 
-function openDepositModal() {
+async function openDepositModal() {
+    const transactions = await db.getAll('transactions');
+    const arTransactions = transactions.filter(t => t.account === '未入金' && t.type === '売上' && t.clearance_status !== 'paid');
+    arTransactions.sort((a, b) => new Date(a.date) - new Date(b.date));
+    
     const overlay = document.createElement('div');
     overlay.className = 'slide-panel-overlay';
     
+    let arListHtml = arTransactions.map(t => {
+        const remaining = (parseFloat(t.amount) || 0) - (parseFloat(t.cleared_amount) || 0);
+        return `<div style="display:flex; justify-content:space-between; align-items:center; padding: 0.5rem; border-bottom:1px solid #eee;">
+            <label style="display:flex; align-items:center; flex:1; cursor:pointer;">
+                <input type="checkbox" class="ar-chk" value="${t.id}" data-amt="${remaining}" style="margin-right:1rem; width:20px; height:20px;">
+                <div>
+                    <div style="font-size:0.85rem; color:#666;">${formatYMD(getJSTDate(t.date))}</div>
+                </div>
+            </label>
+            <div style="font-weight:bold;">¥${remaining.toLocaleString()}</div>
+        </div>`;
+    }).join('');
+    
+    if (arTransactions.length === 0) {
+        arListHtml = '<p style="color:#888;">消込可能な未入金データがありません。</p>';
+    }
+    
     overlay.innerHTML = `
-        <div class="slide-panel">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 1.5rem;">
-                <h3 style="font-size: 1.2rem;">未入金の入金処理</h3>
+        <div class="slide-panel" style="max-height: 90vh; display: flex; flex-direction: column;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 1rem;">
+                <h3 style="font-size: 1.2rem;">未入金の入金消込</h3>
                 <button id="dep-cancel" style="background:none; border:none; font-size: 1.5rem; color: #888;">✕</button>
             </div>
             
-            <div style="margin-bottom: 1.5rem;">
-                未入金残高: <strong style="font-size: 1.2rem;">¥${accountsReceivable.toLocaleString()}</strong>
+            <div style="margin-bottom: 0.5rem;">
+                消込対象の売上を選択してください：
             </div>
             
-            <div style="margin-bottom: 1.5rem;">
-                <label style="font-weight:bold; display:block; margin-bottom:0.5rem;">対象となる未入金額 (減らす額)</label>
-                <input type="number" id="dep-target" value="${accountsReceivable}" max="${accountsReceivable}" style="width:100%; padding: 1rem; border: 1px solid var(--border-color); border-radius: 8px; font-size: 1.2rem;">
+            <div style="flex:1; overflow-y:auto; border:1px solid #ccc; border-radius:8px; margin-bottom:1rem; padding:0.5rem; background:#fff;">
+                ${arListHtml}
             </div>
             
-            <div style="margin-bottom: 1.5rem;">
-                <label style="font-weight:bold; display:block; margin-bottom:0.5rem;">決済手数料など (経費)</label>
-                <input type="number" id="dep-fee" value="0" style="width:100%; padding: 1rem; border: 1px solid var(--border-color); border-radius: 8px; font-size: 1.2rem;">
+            <div style="margin-bottom: 1rem;">
+                <label style="font-weight:bold; display:block; margin-bottom:0.5rem;">選択合計額 (入金額)</label>
+                <input type="number" id="dep-target" value="0" readonly style="width:100%; padding: 0.75rem; border: 1px solid var(--border-color); border-radius: 8px; font-size: 1.2rem; background:#f0f0f0;">
+            </div>
+            
+            <div style="margin-bottom: 1rem;">
+                <label style="font-weight:bold; display:block; margin-bottom:0.5rem;">決済手数料など (経費として引かれる額)</label>
+                <input type="number" id="dep-fee" value="0" style="width:100%; padding: 0.75rem; border: 1px solid var(--border-color); border-radius: 8px; font-size: 1.2rem;">
             </div>
             
             <div style="margin-bottom: 1.5rem; background: #f9f9f9; padding: 1rem; border-radius: 8px;">
                 <div style="display: flex; justify-content: space-between; font-weight: bold; font-size: 1.1rem;">
                     <span>銀行への実際の入金額</span>
-                    <span id="dep-actual" style="color: var(--accent-green);">¥${accountsReceivable.toLocaleString()}</span>
+                    <span id="dep-actual" style="color: var(--accent-green);">¥0</span>
                 </div>
             </div>
             
-            <button id="dep-submit" class="btn-primary">入金を記録</button>
+            <button id="dep-submit" class="btn-primary" disabled>入金を記録</button>
         </div>
     `;
     
@@ -262,47 +275,70 @@ function openDepositModal() {
     const targetInput = document.getElementById('dep-target');
     const feeInput = document.getElementById('dep-fee');
     const actualDisplay = document.getElementById('dep-actual');
+    const btnSubmit = document.getElementById('dep-submit');
+    
+    const checkboxes = overlay.querySelectorAll('.ar-chk');
     
     const updateActual = () => {
-        let target = parseInt(targetInput.value) || 0;
+        let totalSelected = 0;
+        checkboxes.forEach(chk => {
+            if (chk.checked) totalSelected += parseFloat(chk.getAttribute('data-amt'));
+        });
+        targetInput.value = totalSelected;
+        
         let fee = parseInt(feeInput.value) || 0;
-        let actual = target - fee;
+        let actual = totalSelected - fee;
         actualDisplay.innerText = "¥" + actual.toLocaleString();
-        if (actual < 0) actualDisplay.style.color = "var(--accent-red)";
-        else actualDisplay.style.color = "var(--accent-green)";
+        
+        if (actual < 0) {
+            actualDisplay.style.color = "var(--accent-red)";
+            btnSubmit.disabled = true;
+        } else {
+            actualDisplay.style.color = "var(--accent-green)";
+            btnSubmit.disabled = totalSelected === 0;
+        }
     };
     
-    targetInput.addEventListener('input', updateActual);
+    checkboxes.forEach(chk => chk.addEventListener('change', updateActual));
     feeInput.addEventListener('input', updateActual);
     
     document.getElementById('dep-cancel').onclick = () => document.body.removeChild(overlay);
     
-    document.getElementById('dep-submit').onclick = async () => {
-        const btnSubmit = document.getElementById('dep-submit');
+    btnSubmit.onclick = async () => {
         if (btnSubmit.disabled) return;
         
         let target = parseInt(targetInput.value) || 0;
         let fee = parseInt(feeInput.value) || 0;
         let actual = target - fee;
         
-        if (target <= 0 || target > accountsReceivable) {
-            alert("対象額は1円から未入金残高の範囲内で入力してください。");
-            return;
-        }
-        if (actual < 0) {
-            alert("手数料が対象額を上回っています。");
-            return;
-        }
+        if (target <= 0) return;
         
         btnSubmit.disabled = true;
         btnSubmit.innerText = "処理中...";
         
         try {
             const tx = db.transaction(['transactions', 'expenses'], 'readwrite');
+            const store = tx.objectStore('transactions');
             
-            // 1. 未入金から減らす
-            tx.objectStore('transactions').put({
-                id: 'tx_dep_out_' + Date.now(),
+            // 選択された売上のステータスを更新
+            for (const chk of checkboxes) {
+                if (chk.checked) {
+                    const tId = chk.value;
+                    const t = await store.get(tId);
+                    if (t) {
+                        const remaining = (parseFloat(t.amount) || 0) - (parseFloat(t.cleared_amount) || 0);
+                        t.cleared_amount = (parseFloat(t.cleared_amount) || 0) + remaining;
+                        t.clearance_status = 'paid';
+                        store.put(t);
+                    }
+                }
+            }
+            
+            const groupId = Date.now();
+            
+            // 1. 未入金から減らす (全体額)
+            store.put({
+                id: 'tx_dep_out_' + groupId,
                 date: new Date().toISOString(),
                 type: '振替出金',
                 amount: target,
@@ -310,9 +346,9 @@ function openDepositModal() {
                 memo: '決済入金消込'
             });
             
-            // 2. 銀行に満額入ったと仮定して増やす
-            tx.objectStore('transactions').put({
-                id: 'tx_dep_in_' + Date.now(),
+            // 2. 銀行に入金する
+            store.put({
+                id: 'tx_dep_in_' + groupId,
                 date: new Date().toISOString(),
                 type: '振替入金',
                 amount: target,
@@ -320,11 +356,10 @@ function openDepositModal() {
                 memo: '決済入金消込'
             });
             
-            // 3. 手数料があれば銀行から経費として支払ったとして記録
+            // 3. 手数料があれば経費として支払ったとして記録
             if (fee > 0) {
-                // 利益計算用
                 tx.objectStore('expenses').put({
-                    id: 'exp_fee_' + Date.now(),
+                    id: 'exp_fee_' + groupId,
                     date: formatYMD(getJSTDate(new Date().toISOString())),
                     amount: fee,
                     category: '支払手数料',
@@ -599,3 +634,94 @@ async function handleJSONImport(event) {
     };
     reader.readAsText(file);
 }
+
+async function openTaxPaymentModal(defaultYear) {
+    const overlay = document.createElement('div');
+    overlay.className = 'slide-panel-overlay';
+    
+    // 現在の年をデフォルトの日付に使用
+    const today = formatYMD(getJSTDate(new Date().toISOString()));
+    
+    overlay.innerHTML = `
+        <div class="slide-panel">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 1.5rem;">
+                <h3 style="font-size: 1.2rem;">税金の支払いを記録</h3>
+                <button id="tp-cancel" style="background:none; border:none; font-size: 1.5rem; color: #888;">✕</button>
+            </div>
+            
+            <div style="margin-bottom: 1.5rem;">
+                <label style="font-weight:bold; display:block; margin-bottom:0.5rem;">対象の所得年</label>
+                <input type="number" id="tp-year" value="${defaultYear}" style="width:100%; padding: 1rem; border: 1px solid var(--border-color); border-radius: 8px; font-size: 1.2rem; background:#f9f9f9;" readonly>
+                <div style="font-size:0.8rem; color:#666; margin-top:0.2rem;">※${parseInt(defaultYear)+1}年などに納付する税金でも、対象となった所得年(${defaultYear}年)に紐づけます。</div>
+            </div>
+            
+            <div style="margin-bottom: 1.5rem;">
+                <label style="font-weight:bold; display:block; margin-bottom:0.5rem;">支払額</label>
+                <input type="number" id="tp-amount" style="width:100%; padding: 1rem; border: 1px solid var(--border-color); border-radius: 8px; font-size: 1.2rem;">
+            </div>
+            
+            <div style="margin-bottom: 1.5rem;">
+                <label style="font-weight:bold; display:block; margin-bottom:0.5rem;">支払日</label>
+                <input type="date" id="tp-date" value="${today}" style="width:100%; padding: 1rem; border: 1px solid var(--border-color); border-radius: 8px; font-size: 1.2rem;">
+            </div>
+            
+            <div style="margin-bottom: 1.5rem;">
+                <label style="font-weight:bold; display:block; margin-bottom:0.5rem;">支払元</label>
+                <select id="tp-account" style="width:100%; padding: 1rem; border: 1px solid var(--border-color); border-radius: 8px; font-size: 1.2rem; appearance: none; background: #fff;">
+                    <option value="現金">現金</option>
+                    <option value="銀行A">銀行A</option>
+                </select>
+            </div>
+            
+            <div style="margin-bottom: 1.5rem;">
+                <label style="font-weight:bold; display:block; margin-bottom:0.5rem;">メモ・税目など</label>
+                <input type="text" id="tp-memo" placeholder="例: 2026年分 所得税" style="width:100%; padding: 1rem; border: 1px solid var(--border-color); border-radius: 8px; font-size: 1.2rem;">
+            </div>
+            
+            <button id="tp-submit" class="btn-primary">支払を記録</button>
+        </div>
+    `;
+    
+    document.body.appendChild(overlay);
+    
+    document.getElementById('tp-cancel').onclick = () => document.body.removeChild(overlay);
+    
+    document.getElementById('tp-submit').onclick = async () => {
+        const btnSubmit = document.getElementById('tp-submit');
+        if (btnSubmit.disabled) return;
+        
+        let amount = parseInt(document.getElementById('tp-amount').value) || 0;
+        if (amount <= 0) {
+            alert("支払額を正しく入力してください。");
+            return;
+        }
+        
+        btnSubmit.disabled = true;
+        btnSubmit.innerText = "処理中...";
+        
+        try {
+            const tx = db.transaction(['transactions'], 'readwrite');
+            
+            tx.objectStore('transactions').put({
+                id: 'tx_tax_' + Date.now(),
+                date: new Date(document.getElementById('tp-date').value).toISOString(),
+                type: '税金',
+                amount: amount,
+                account: document.getElementById('tp-account').value,
+                memo: document.getElementById('tp-memo').value,
+                tax_year: document.getElementById('tp-year').value
+            });
+            
+            await tx.done;
+            alert('税金の支払いを記録しました。');
+            document.body.removeChild(overlay);
+            loadFunds();
+        } catch (e) {
+            console.error(e);
+            alert("処理に失敗しました。");
+            btnSubmit.disabled = false;
+            btnSubmit.innerText = "支払を記録";
+        }
+    };
+}
+

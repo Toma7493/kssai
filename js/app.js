@@ -5,6 +5,7 @@ async function initApp() {
         db = await initDB();
         await populateInitialData(db);
         await migrateNonCashSales(db);
+        await upgradeARTransactions(db);
         
         setupNavigation();
         loadDraft();
@@ -583,7 +584,9 @@ function openCheckoutModal() {
                     type: '売上',
                     amount: finalT,
                     account: '未入金',
-                    ref_id: sale.id
+                    ref_id: sale.id,
+                    clearance_status: 'unpaid',
+                    cleared_amount: 0
                 });
             }
             
