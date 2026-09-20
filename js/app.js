@@ -59,8 +59,12 @@ function showSection(id) {
 }
 
 window.goToSettings = function() {
-    const navBtn = document.querySelector('.nav-btn[data-target="settings"]');
-    if (navBtn) navBtn.click();
+    showSection('settings');
+    
+    // 下部ナビゲーションの「その他(more)」を選択状態にする
+    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+    const moreBtn = document.querySelector('.nav-btn[data-target="more"]');
+    if (moreBtn) moreBtn.classList.add('active');
     
     // Wait for the async render of settings page to finish
     setTimeout(() => {
@@ -73,8 +77,15 @@ window.goToSettings = function() {
 
 window.returnFromSettings = function() {
     const navBtn = document.querySelector(`.nav-btn[data-target="${previousSectionId}"]`);
-    if (navBtn) navBtn.click();
-    else showSection(previousSectionId);
+    if (navBtn) {
+        navBtn.click();
+    } else {
+        showSection(previousSectionId);
+        // settings以外でnavBtnがないセクション（products等）は基本的に「more」配下
+        document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+        const moreBtn = document.querySelector('.nav-btn[data-target="more"]');
+        if (moreBtn) moreBtn.classList.add('active');
+    }
 };
 
 // --- POS Logic ---
