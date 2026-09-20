@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>名の無いタコスとバーガー屋 POS & 管理システム</title>
+    <link rel="stylesheet" href="css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/idb@8/build/umd.js"></script>
+</head>
+<body>
+    <header class="app-header">
+        <div class="logo">🍔🌮 名の無いタコスとバーガー屋</div>
+        <nav class="main-nav">
+            <button class="nav-btn active" data-target="dashboard">ダッシュボード</button>
+            <button class="nav-btn" data-target="pos">レジ (POS)</button>
+            <button class="nav-btn" data-target="history">売上履歴</button>
+            <button class="nav-btn" data-target="expenses">経費</button>
+            <button class="nav-btn" data-target="products">商品管理</button>
+            <button class="nav-btn" data-target="analytics">分析</button>
+            <button class="nav-btn" data-target="funds">資金・税金</button>
+            <button class="nav-btn" data-target="settings">設定</button>
+        </nav>
+    </header>
+
+    <main class="app-main">
+        <!-- 各画面のコンテナ -->
+        <section id="dashboard" class="page-section active">
+            <!-- ダッシュボードの内容 -->
+        </section>
+        <section id="pos" class="page-section">
+            <!-- レジ画面の内容 -->
+        </section>
+        <section id="history" class="page-section">
+            <!-- 売上履歴の内容 -->
+        </section>
+        <section id="expenses" class="page-section">
+            <!-- 経費の内容 -->
+        </section>
+        <section id="products" class="page-section">
+            <!-- 商品管理の内容 -->
+        </section>
+        <section id="analytics" class="page-section">
+            <!-- 分析の内容 -->
+        </section>
+        <section id="funds" class="page-section">
+            <!-- 資金・税金の内容 -->
+        </section>
+        <section id="settings" class="page-section">
+            <!-- 設定の内容 -->
+        </section>
+    </main>
+
+    <script src="js/db.js"></script>
+    <script src="js/dashboard.js"></script>
+    <script src="js/history.js"></script>
+    <script src="js/expenses.js"></script>
+    <script src="js/products.js"></script>
+    <script src="js/analytics.js"></script>
+    <script src="js/funds.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
