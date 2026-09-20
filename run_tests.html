@@ -180,42 +180,117 @@
                 assert(taxDataF.autoSim.incomeTax >= 0, 'F. Income tax calculated', true, taxDataF.autoSim.incomeTax >= 0);
             }
             
-            log('<br>Test G: Cross-Year Tax Logic');
-            // Insert tax payment for 2026
-            await dbInstance.put('transactions', {
-                id: 'tx_tax_test1',
-                date: '2027-03-15',
-                type: '税金',
-                amount: 50000,
-                account: '現金',
-                tax_year: '2026'
-            });
-            // Manual mode for easy testing
-            await dbInstance.put('settings', { key: 'tax_calc_mode', value: 'manual' });
-            await dbInstance.put('settings', { key: 'tax_rate', value: 20 }); 
-            // Mock profit for 2026
-            await dbInstance.put('transactions', {
-                id: 'tx_sales_test2026',
-                date: '2026-12-01',
-                type: '現金売上',
-                amount: 500000,
-                account: '現金'
-            });
-            let taxDataG2026 = await calculateTaxReserve(dbInstance, '2026', false);
-            // Profit for 2026 = 500k. Manual 20% = 100k. Paid tax = 50k. Remaining = 50k.
-            assert(taxDataG2026.remainingReserve === 50000, 'G. 2026年の税金残高が50kになる (100k - 50k)', 50000, taxDataG2026.remainingReserve);
+            log('<br>Test H: End-to-End Calculation and Cancellation');
             
-            // Mock profit for 2027
+            // Wipe db for clean test H
+            const txWipe = dbInstance.transaction(['transactions', 'expenses'], 'readwrite');
+            await txWipe.objectStore('transactions').clear();
+            await txWipe.objectStore('expenses').clear();
+            await txWipe.done;
+            
+            // Settings: manual 20%
+            await dbInstance.put('settings', { key: 'tax_calc_mode', value: 'manual' });
+            await dbInstance.put('settings', { key: 'tax_rate_configured', value: true });
+            await dbInstance.put('settings', { key: 'tax_rate', value: 20 });
+            
+            // 1. 現金売上100,000円
             await dbInstance.put('transactions', {
-                id: 'tx_sales_test2027',
-                date: '2027-01-10',
+                id: 'tx_h1',
+                date: '2026-10-01T10:00:00Z',
                 type: '現金売上',
-                amount: 300000,
+                amount: 100000,
                 account: '現金'
             });
-            let taxDataG2027 = await calculateTaxReserve(dbInstance, '2027', false);
-            // Profit for 2027 = 300k. Manual 20% = 60k. Paid tax for 2027 = 0. Remaining = 60k.
-            assert(taxDataG2027.remainingReserve === 60000, 'G. 2027年の税金残高は2026年の税金支払いに影響されない (60k)', 60000, taxDataG2027.remainingReserve);
+            await dbInstance.put('sales', {
+                id: 'sale_h1',
+                date: '2026-10-01T10:00:00Z',
+                total: 100000,
+                payment_method: 'cash',
+                refunded: false
+            });
+            
+            let taxH1 = await calculateTaxReserve(dbInstance, '2026', false);
+            assert(taxH1.profit === 100000, 'H1. 利益は100,000', 100000, taxH1.profit);
+            assert(taxH1.remainingReserve === 20000, 'H1. 取り置き20,000', 20000, taxH1.remainingReserve);
+            
+            // 2. 支払済み経費30,000円を追加
+            await dbInstance.put('expenses', {
+                id: 'exp_h1',
+                date: '2026-10-02T10:00:00Z',
+                category: '仕入',
+                amount: 30000,
+                is_paid: true,
+                account: '現金'
+            });
+            await dbInstance.put('transactions', {
+                id: 'tx_h2',
+                date: '2026-10-02T10:00:00Z',
+                type: '経費',
+                amount: 30000,
+                account: '現金'
+            });
+            
+            let taxH2 = await calculateTaxReserve(dbInstance, '2026', false);
+            assert(taxH2.profit === 70000, 'H2. 利益は70,000', 70000, taxH2.profit);
+            assert(taxH2.remainingReserve === 14000, 'H2. 取り置き14,000', 14000, taxH2.remainingReserve);
+            
+            // Check funds manually to simulate dashboard logic
+            const allTxH2 = await dbInstance.getAll('transactions');
+            let cashH2 = allTxH2.reduce((sum, t) => sum + (t.type === '経費' ? -t.amount : t.amount), 0);
+            assert(cashH2 === 70000, 'H2. 現金残高は70,000', 70000, cashH2);
+            
+            // 3. 上記の売上を全額取消
+            await dbInstance.put('sales', {
+                id: 'sale_h1',
+                date: '2026-10-01T10:00:00Z',
+                total: 100000,
+                payment_method: 'cash',
+                refunded: true
+            });
+            // 返金トランザクション追加 (funds.js logic typically does this)
+            await dbInstance.put('transactions', {
+                id: 'tx_h1_refund',
+                date: '2026-10-03T10:00:00Z',
+                type: '返金',
+                amount: -100000,
+                account: '現金'
+            });
+            
+            let taxH3 = await calculateTaxReserve(dbInstance, '2026', false);
+            assert(taxH3.profit === -30000, 'H3. calculateTaxReserve returns profit=-30000 after cancellation.', -30000, taxH3.profit);
+            assert(taxH3.remainingReserve === 0, 'H3. 利益がマイナスのため取り置きは0', 0, taxH3.remainingReserve);
+            
+            // 4. クレジットカード未入金の売上
+            await dbInstance.put('transactions', {
+                id: 'tx_h4_card',
+                date: '2026-10-04T10:00:00Z',
+                type: '売掛金',
+                amount: 50000,
+                account: 'カード'
+            });
+            await dbInstance.put('sales', {
+                id: 'sale_h4',
+                date: '2026-10-04T10:00:00Z',
+                total: 50000,
+                payment_method: 'card',
+                refunded: false
+            });
+            let taxH4 = await calculateTaxReserve(dbInstance, '2026', false);
+            assert(taxH4.profit === 20000, 'H4. 利益は-30000 + 50000 = 20000', 20000, taxH4.profit);
+            assert(taxH4.remainingReserve === 4000, 'H4. 取り置きは 20000 * 20% = 4000', 4000, taxH4.remainingReserve);
+
+            
+            log('<br>Test I: Unconfigured State');
+            await dbInstance.put('settings', { key: 'tax_rate_configured', value: false });
+            let taxI = await calculateTaxReserve(dbInstance, '2026', false);
+            assert(taxI.isConfigured === false, 'I. isConfigured is false when tax_rate_configured is false', false, taxI.isConfigured);
+            assert(taxI.remainingReserve === 0, 'I. Unconfigured reserve is 0 internally', 0, taxI.remainingReserve);
+            
+            // Back to configured auto mode, but without auto configured
+            await dbInstance.put('settings', { key: 'tax_calc_mode', value: 'auto' });
+            await dbInstance.put('settings', { key: 'tax_auto_configured', value: false });
+            let taxI2 = await calculateTaxReserve(dbInstance, '2026', false);
+            assert(taxI2.isConfigured === false, 'I. isConfigured is false when auto mode but tax_auto_configured is false', false, taxI2.isConfigured);
             
             log('<br>テスト完了しました。');
             

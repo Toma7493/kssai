@@ -194,7 +194,7 @@ async function calculateTaxReserve(dbInstance, targetYear = null, useAnnualProje
     
     const totalSales = validSales.reduce((sum, s) => sum + s.total, 0);
     const totalExpenses = allExpensesForProfit.reduce((sum, e) => sum + e.amount, 0);
-    const actualProfit = Math.max(0, totalSales - totalExpenses);
+    const actualProfit = totalSales - totalExpenses;
     
     autoConfig.estimatedExpenses = totalExpenses;
     
@@ -218,16 +218,19 @@ async function calculateTaxReserve(dbInstance, targetYear = null, useAnnualProje
     
     // Manual calculation
     let manualReserve = 0;
-    if (manualTaxRateStr !== '未設定') {
-        manualReserve = Math.floor(projectedProfit * manualTaxRate);
+    if (isConfigured) {
+        manualReserve = Math.floor(Math.max(0, projectedProfit) * manualTaxRate);
     }
     
     // Auto Tax Simulation
     let autoSim = null;
-    if (typeof simulateTaxes !== 'undefined') {
+    const isAutoConfigured = getSet('tax_auto_configured', false);
+    
+    if (taxMode === 'auto' && isAutoConfigured && typeof simulateTaxes !== 'undefined') {
         autoSim = simulateTaxes(projectedProfit, autoConfig, targetYear || String(new Date().getFullYear()));
     }
     
+    const isConfiguredNow = (taxMode === 'auto') ? isAutoConfigured : isConfigured;
     const reserveToUse = (taxMode === 'auto' && autoSim) ? autoSim.totalTax : manualReserve;
     
     // Tax Paid deduction
@@ -258,6 +261,7 @@ async function calculateTaxReserve(dbInstance, targetYear = null, useAnnualProje
         projectedProfit,
         projectedSales,
         taxMode, // 'manual' or 'auto'
+        isConfigured: isConfiguredNow,
         taxRateStr: manualTaxRateStr,
         totalReserveNeeded: reserveToUse,
         taxPaid,

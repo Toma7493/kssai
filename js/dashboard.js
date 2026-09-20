@@ -137,14 +137,30 @@ async function loadDashboard() {
                 <span style="color:#666;">現預金残高</span>
                 <span style="font-weight:bold;">¥${currentFunds.toLocaleString()}</span>
             </div>
-            <div style="display:flex; justify-content:space-between; margin-bottom: 0.5rem;">
-                <span style="color:#666;">${taxData.taxMode === 'auto' ? '税額概算' : '納税用の取り置き目安'} (${taxData.taxRateStr})</span>
-                <span style="color:var(--accent-red); font-weight:bold;">-¥${taxData.remainingReserve.toLocaleString()}</span>
-            </div>
+            
+            ${!taxData.isConfigured ? `
+                <div style="display:flex; justify-content:space-between; margin-bottom: 0.5rem; align-items:center;">
+                    <span style="color:#666;">${taxData.taxMode === 'auto' ? '税額概算' : '設定率による取り置き目安'}</span>
+                    <span style="color:#888; font-weight:bold;">— (設定が必要)</span>
+                </div>
+                <div style="text-align:right; margin-bottom: 0.5rem;">
+                    <button onclick="showSection('funds')" class="btn-primary" style="padding: 0.25rem 0.75rem; font-size: 0.8rem; width:auto;">⚙️ 計算設定へ</button>
+                </div>
+            ` : `
+                <div style="display:flex; justify-content:space-between; margin-bottom: 0.5rem;">
+                    <span style="color:#666;">${taxData.taxMode === 'auto' ? '税額概算' : '設定率による取り置き目安'} (${taxData.taxMode === 'manual' ? taxData.taxRateStr : '自動'})</span>
+                    <span style="color:var(--accent-red); font-weight:bold;">-¥${taxData.remainingReserve.toLocaleString()}</span>
+                </div>
+            `}
+            
             <hr style="border:0; border-top:1px dashed #ffcccc; margin:0.5rem 0;">
             <div style="display:flex; justify-content:space-between; align-items:center;">
                 <span style="font-weight:bold;">利用可能額の目安</span>
-                <span style="font-weight:bold; font-size:1.3rem; color:var(--accent-red);">¥${availableFunds.toLocaleString()}</span>
+                ${!taxData.isConfigured ? `
+                    <span style="font-weight:bold; font-size:1.1rem; color:#888;">計算保留 (納税分未控除)</span>
+                ` : `
+                    <span style="font-weight:bold; font-size:1.3rem; color:var(--accent-red);">¥${availableFunds.toLocaleString()}</span>
+                `}
             </div>
             <p style="font-size:0.8rem; color:#888; margin-top:0.5rem;">※未払い経費などの将来支払い見込みをすべて控除した金額ではありません。</p>
         </div>
