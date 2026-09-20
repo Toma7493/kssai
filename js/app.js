@@ -473,6 +473,11 @@ function openCheckoutModal() {
             </div>
             
             <div style="margin-bottom: 1.5rem;">
+                <label style="font-weight:bold; display:block; margin-bottom:0.5rem;">販売日時</label>
+                <input type="datetime-local" id="chk-datetime" style="width:100%; padding: 1rem; border: 1px solid var(--border-color); border-radius: 8px; font-size: 1.2rem;">
+            </div>
+            
+            <div style="margin-bottom: 1.5rem;">
                 <label style="font-weight:bold; display:block; margin-bottom:0.5rem;">値引き (円)</label>
                 <input type="number" id="chk-discount" value="0" style="width:100%; padding: 1rem; border: 1px solid var(--border-color); border-radius: 8px; font-size: 1.2rem;">
             </div>
@@ -502,6 +507,14 @@ function openCheckoutModal() {
     `;
     
     document.body.appendChild(overlay);
+    
+    // Set default datetime to current local time
+    const datetimeInput = document.getElementById('chk-datetime');
+    if (datetimeInput) {
+        const now = new Date();
+        now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+        datetimeInput.value = now.toISOString().slice(0, 16);
+    }
     
     let selectedMethod = '現金';
     const methodBtns = overlay.querySelectorAll('.pay-method-btn');
@@ -574,9 +587,18 @@ function openCheckoutModal() {
         
         try {
             const locName = document.getElementById('current-location-display').innerText;
+            
+            let saleDate = new Date().toISOString();
+            if (datetimeInput && datetimeInput.value) {
+                const parsedDate = new Date(datetimeInput.value);
+                if (!isNaN(parsedDate.getTime())) {
+                    saleDate = parsedDate.toISOString();
+                }
+            }
+            
             const sale = {
                 id: 's_' + Date.now(),
-                date: new Date().toISOString(),
+                date: saleDate,
                 location: locName,
                 method: selectedMethod,
                 discount: disc,
