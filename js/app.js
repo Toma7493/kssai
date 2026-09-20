@@ -1,6 +1,6 @@
 let db;
 
-document.addEventListener('DOMContentLoaded', async () => {
+async function initApp() {
     try {
         db = await initDB();
         await populateInitialData(db);
@@ -15,7 +15,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         console.error("DB Initialization error", e);
         alert("データベースの初期化に失敗しました。");
     }
-});
+}
 
 function setupNavigation() {
     const navBtns = document.querySelectorAll('.nav-btn');
