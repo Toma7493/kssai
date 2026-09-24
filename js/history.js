@@ -35,7 +35,11 @@ async function renderHistoryCards() {
             : '商品なし';
             
         const dateObj = new Date(sale.date);
-        const dateStr = dateObj.toLocaleDateString('ja-JP', { month:'numeric', day:'numeric' }) + ' ' + dateObj.toLocaleTimeString('ja-JP', { hour:'2-digit', minute:'2-digit' });
+        let dateStr = dateObj.toLocaleDateString('ja-JP', { month:'numeric', day:'numeric' }) + ' ' + dateObj.toLocaleTimeString('ja-JP', { hour:'2-digit', minute:'2-digit' });
+        
+        if (sale.date.startsWith("2000-01-01")) {
+            dateStr = "日時不明";
+        }
         
         const isRefunded = sale.refunded;
         

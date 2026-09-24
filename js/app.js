@@ -11,6 +11,11 @@ async function initApp() {
         loadDraft();
         loadPOSProducts();
         
+        const savedLoc = localStorage.getItem('kssai_current_location');
+        if (savedLoc) {
+            document.getElementById('current-location-display').innerText = savedLoc;
+        }
+        
         // 初回画面表示
         showSection('pos');
     } catch (e) {
@@ -142,6 +147,9 @@ function renderPOSSection() {
             <input type="text" id="pos-search" placeholder="商品名を検索..." value="${searchQuery}" style="width:100%; padding: 1rem; margin-bottom: 1rem; border: 1px solid var(--border-color); border-radius: 8px; font-size: 16px;">
             
             <div style="display: flex; gap: 0.5rem; overflow-x: auto; padding-bottom: 1rem; margin-bottom: 1rem; -webkit-overflow-scrolling: touch; scrollbar-width: none;">
+                <button onclick="openBulkInputModal()" style="padding: 0.5rem 1rem; border: 1px dashed var(--accent-red); background: #fff; color: var(--accent-red); border-radius: 20px; white-space: nowrap; font-weight: bold; min-height: 44px;">
+                    ＋金額を手入力
+                </button>
                 ${categories.map(c => `
                     <button class="cat-btn" data-cat="${c}" style="padding: 0.5rem 1rem; border: 1px solid var(--accent-red); background: ${selectedCategory === c ? 'var(--accent-red)' : '#fff'}; color: ${selectedCategory === c ? '#fff' : 'var(--accent-red)'}; border-radius: 20px; white-space: nowrap; font-weight: bold; min-height: 44px;">
                         ${c}
@@ -675,3 +683,220 @@ function openCheckoutModal() {
         }
     };
 }
+
+window.openLocationModal = function() {
+    let locs = JSON.parse(localStorage.getItem('kssai_locations') || '["メインキッチン"]');
+    const overlay = document.createElement('div');
+    overlay.className = 'slide-panel-overlay';
+    
+    const renderList = () => {
+        return locs.map(l => `
+            <div style="padding:1rem; border-bottom:1px solid #ccc; display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-size:1.1rem; font-weight:bold;">${l}</span>
+                <button class="btn-primary select-loc-btn" data-loc="${l}" style="width:auto; padding:0.5rem 1rem;">選択</button>
+            </div>
+        `).join('');
+    };
+
+    overlay.innerHTML = `
+        <div class="slide-panel" style="max-height: 80vh; display:flex; flex-direction:column;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 1rem;">
+                <h3 style="font-size: 1.2rem;">販売場所の選択</h3>
+                <button id="loc-cancel" style="background:none; border:none; font-size: 1.5rem; color: #888;">✕</button>
+            </div>
+            <div style="flex:1; overflow-y:auto; margin-bottom:1rem; border:1px solid #eee; border-radius:8px;" id="loc-list-container">
+                ${renderList()}
+            </div>
+            <div style="display:flex; gap:0.5rem;">
+                <input type="text" id="new-loc-input" placeholder="新しい場所を追加..." style="flex:1; padding:0.75rem; border:1px solid #ccc; border-radius:4px;">
+                <button id="loc-add" class="btn-primary" style="width:auto; padding:0.75rem 1rem;">追加</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    
+    document.getElementById('loc-cancel').onclick = () => document.body.removeChild(overlay);
+    
+    const attachSelectEvents = () => {
+        overlay.querySelectorAll('.select-loc-btn').forEach(btn => {
+            btn.onclick = (e) => {
+                const l = e.target.getAttribute('data-loc');
+                localStorage.setItem('kssai_current_location', l);
+                document.getElementById('current-location-display').innerText = l;
+                document.body.removeChild(overlay);
+            };
+        });
+    };
+    attachSelectEvents();
+    
+    document.getElementById('loc-add').onclick = () => {
+        const val = document.getElementById('new-loc-input').value.trim();
+        if (val && !locs.includes(val)) {
+            locs.push(val);
+            localStorage.setItem('kssai_locations', JSON.stringify(locs));
+            document.getElementById('loc-list-container').innerHTML = renderList();
+            document.getElementById('new-loc-input').value = '';
+            attachSelectEvents();
+        }
+    };
+};
+
+window.openBulkInputModal = function() {
+    const overlay = document.createElement('div');
+    overlay.className = 'slide-panel-overlay';
+    
+    overlay.innerHTML = `
+        <div class="slide-panel" style="max-height: 95vh;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 1rem;">
+                <h3 style="font-size: 1.2rem;">売上金額の手入力</h3>
+                <button id="bulk-cancel" style="background:none; border:none; font-size: 1.5rem; color: #888;">✕</button>
+            </div>
+            
+            <div style="margin-bottom: 1.5rem;">
+                <label style="font-weight:bold; display:block; margin-bottom:0.5rem;">売上金額 (円)</label>
+                <input type="number" id="bulk-amount" placeholder="例: 10000" style="width:100%; padding: 1rem; border: 1px solid var(--border-color); border-radius: 8px; font-size: 1.2rem;">
+            </div>
+            
+            <div style="margin-bottom: 1.5rem;">
+                <label style="font-weight:bold; display:block; margin-bottom:0.5rem;">販売日時</label>
+                <div style="display:flex; flex-direction:column; gap:0.5rem;">
+                    <label style="display:flex; align-items:center; gap:0.5rem; cursor:pointer;">
+                        <input type="checkbox" id="bulk-unknown-date" style="width:24px; height:24px;">
+                        <span style="font-weight:bold;">日付・日時不明として記録する</span>
+                    </label>
+                    <input type="datetime-local" id="bulk-datetime" style="width:100%; padding: 1rem; border: 1px solid var(--border-color); border-radius: 8px; font-size: 1.2rem;">
+                </div>
+            </div>
+            
+            <div style="margin-bottom: 1.5rem;">
+                <label style="font-weight:bold; display:block; margin-bottom:0.5rem;">支払方法</label>
+                <select id="bulk-method" style="width:100%; padding: 1rem; border: 1px solid var(--border-color); border-radius: 8px; font-size: 1.2rem;">
+                    <option value="現金">現金</option>
+                    <option value="クレジットカード">クレジットカード</option>
+                    <option value="QR決済">QR決済</option>
+                    <option value="その他">その他</option>
+                </select>
+            </div>
+            
+            <button id="bulk-submit" class="btn-primary">記録する</button>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    
+    const datetimeInput = document.getElementById('bulk-datetime');
+    const unknownChk = document.getElementById('bulk-unknown-date');
+    
+    const now = new Date();
+    now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+    datetimeInput.value = now.toISOString().slice(0, 16);
+    
+    unknownChk.onchange = () => {
+        datetimeInput.disabled = unknownChk.checked;
+        if (unknownChk.checked) {
+            datetimeInput.style.opacity = '0.5';
+        } else {
+            datetimeInput.style.opacity = '1';
+        }
+    };
+    
+    document.getElementById('bulk-cancel').onclick = () => document.body.removeChild(overlay);
+    
+    let isSubmitting = false;
+    document.getElementById('bulk-submit').onclick = async () => {
+        if (isSubmitting) return;
+        const amount = parseInt(document.getElementById('bulk-amount').value);
+        if (!amount || amount <= 0 || isNaN(amount)) {
+            alert("正しい金額を入力してください。");
+            return;
+        }
+        
+        isSubmitting = true;
+        const btnSubmit = document.getElementById('bulk-submit');
+        btnSubmit.innerText = "保存中...";
+        btnSubmit.style.opacity = "0.7";
+        
+        try {
+            const locName = document.getElementById('current-location-display').innerText;
+            const method = document.getElementById('bulk-method').value;
+            
+            let saleDate = new Date().toISOString();
+            if (unknownChk.checked) {
+                saleDate = "2000-01-01T00:00:00.000Z";
+            } else if (datetimeInput.value) {
+                const parsedDate = new Date(datetimeInput.value);
+                if (!isNaN(parsedDate.getTime())) {
+                    saleDate = parsedDate.toISOString();
+                }
+            }
+            
+            const sale = {
+                id: 's_' + Date.now(),
+                date: saleDate,
+                location: locName,
+                method: method,
+                discount: 0,
+                total: amount,
+                containerCount: 0,
+                containerTotal: 0,
+                memo: "手入力売上",
+                refunded: false
+            };
+            
+            const tx = db.transaction(['sales', 'sale_items', 'transactions'], 'readwrite');
+            tx.objectStore('sales').put(sale);
+            
+            tx.objectStore('sale_items').put({
+                id: 'si_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+                sale_id: sale.id,
+                product_id: 'dummy_bulk',
+                name: '手入力売上',
+                unit_price: amount,
+                cost: 0,
+                quantity: 1,
+                toppings: [],
+                refunded_quantity: 0
+            });
+            
+            if (method === '現金') {
+                tx.objectStore('transactions').put({
+                    id: 'tx_' + Date.now(),
+                    date: sale.date,
+                    type: '売上',
+                    amount: amount,
+                    account: '現金',
+                    ref_id: sale.id
+                });
+            } else {
+                tx.objectStore('transactions').put({
+                    id: 'tx_ar_' + Date.now(),
+                    date: sale.date,
+                    type: '売上',
+                    amount: amount,
+                    account: '未入金',
+                    ref_id: sale.id,
+                    clearance_status: 'unpaid',
+                    cleared_amount: 0
+                });
+            }
+            
+            await tx.done;
+            document.body.removeChild(overlay);
+            
+            const toast = document.createElement('div');
+            toast.innerText = "売上を記録しました";
+            toast.style.cssText = "position:fixed; bottom:80px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,0.8); color:#fff; padding:10px 20px; border-radius:20px; z-index:10000; font-weight:bold;";
+            document.body.appendChild(toast);
+            setTimeout(() => { if (toast.parentNode) document.body.removeChild(toast); }, 2000);
+            
+            if (typeof renderPOSSection === 'function') renderPOSSection();
+            
+        } catch (e) {
+            console.error(e);
+            alert("保存に失敗しました。");
+            btnSubmit.innerText = "記録する";
+            btnSubmit.style.opacity = "1";
+        } finally {
+            isSubmitting = false;
+        }
+    };
+};
